@@ -15,6 +15,12 @@ pub struct Config {
     pub language: String,
     pub seek_step: u64,
     pub volume_step: f32,
+    // YouTube search / download (via yt-dlp)
+    pub yt_dlp_path: String,
+    pub yt_dlp_format: String,
+    pub yt_dlp_quality: String,
+    pub yt_dlp_output: String,
+    pub yt_search_results: usize,
 }
 
 impl Default for Config {
@@ -27,6 +33,11 @@ impl Default for Config {
             language: "auto".into(),
             seek_step: 5,
             volume_step: 0.05,
+            yt_dlp_path: "yt-dlp".into(),
+            yt_dlp_format: "mp3".into(),
+            yt_dlp_quality: "128K".into(),
+            yt_dlp_output: "%(title)s.%(ext)s".into(),
+            yt_search_results: 15,
         }
     }
 }
@@ -118,4 +129,24 @@ seek_step = 5
 
 # Volume delta per + / - keypress
 volume_step = 0.05
+
+# ── YouTube search & download (press Y in the library) ────────────────────────
+# Requires yt-dlp:  sudo pacman -S yt-dlp   (and ffmpeg for audio conversion)
+
+# Path to the yt-dlp executable
+yt_dlp_path = "yt-dlp"
+
+# Audio container for downloads (mp3, opus, flac, m4a…)
+yt_dlp_format = "mp3"
+
+# Audio bitrate, e.g. 128K or 192K
+yt_dlp_quality = "128K"
+
+# Filename template, relative to music_dir. These are yt-dlp output fields.
+# %(title)s and %(uploader)s both work. lavanda reads the embedded tags, not
+# the filename, so this only affects how files look in your file manager.
+yt_dlp_output = "%(title)s.%(ext)s"
+
+# How many results to fetch per search
+yt_search_results = 15
 "#;

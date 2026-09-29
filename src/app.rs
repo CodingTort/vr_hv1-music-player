@@ -79,6 +79,25 @@ pub struct PlaylistDialogState {
     pub add_album: bool,
 }
 
+// ── YouTube search dialog ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+pub struct YtSearchState {
+    pub query: String,
+    pub results: Vec<crate::youtube::YtResult>,
+    /// Index of the highlighted result.
+    pub selected: Option<usize>,
+    pub searching: bool,
+    /// Set when a search or download fails.
+    pub error: Option<String>,
+    /// Transient progress/success line.
+    pub status: Option<String>,
+    /// Index of the result currently downloading.
+    pub downloading: Option<usize>,
+    /// yt-dlp missing/unusable — shown before any search is attempted.
+    pub preflight_error: Option<String>,
+}
+
 // ── Tag editor ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -190,6 +209,16 @@ pub enum Message {
     AddTracksToPlaylist(String, Vec<Track>),
     CreatePlaylistFromContext(String, bool),
     CreatePlaylistWithTracks(String, Vec<Track>),
+
+    // YouTube search (yt-dlp)
+    OpenYtSearch,
+    CloseYtSearch,
+    YtQueryChanged(String),
+    YtSubmit,
+    YtSearched(Result<Vec<crate::youtube::YtResult>, String>),
+    YtSelect(usize),
+    YtDownload(usize),
+    YtDownloaded(Result<Option<std::path::PathBuf>, String>),
 
     // Tag editor
     OpenTagEditor(Vec<Track>),
@@ -310,6 +339,9 @@ pub struct AppState {
     // Playlist dialog
     pub playlist_dialog: Option<PlaylistDialogState>,
 
+    // YouTube search dialog
+    pub yt_dialog: Option<YtSearchState>,
+
     // Context menu
     pub show_context_menu: Option<ContextMenuTarget>,
 
@@ -421,6 +453,7 @@ impl AppState {
             group_by_album: false,
             show_tag_editor: None,
             playlist_dialog: None,
+            yt_dialog: None,
             show_context_menu: None,
             hidden_artists_albums: hidden,
             playlist_height: 141.0,
@@ -640,6 +673,133 @@ impl AppState {
                 }
                 self.update_filtered_tracks();
                 self.persist_state();
+                Task::none()
+            }
+
+            // ── YouTube search (yt-dlp) ──────────────────────────────────────
+
+            Message::OpenYtSearch => {
+                // Fail fast with a useful message rather than a cryptic spawn
+                // error later on.
+                let preflight_error = crate::youtube::preflight(crate::config::get());
+                self.yt_dialog = Some(YtSearchState {
+                    query: self.search_query.clone(),
+                    preflight_error,
+                    ..YtSearchState::default()
+                });
+                Task::none()
+            }
+
+            Message::CloseYtSearch => {
+                self.yt_dialog = None;
+                Task::none()
+            }
+
+            Message::YtQueryChanged(v) => {
+                if let Some(ref mut d) = self.yt_dialog {
+                    d.query = v;
+                }
+                Task::none()
+            }
+
+            Message::YtSubmit => {
+                let Some(d) = self.yt_dialog.as_mut() else { return Task::none() };
+                let query = d.query.trim().to_string();
+                if query.is_empty() {
+                    d.error = Some("Type something to search for.".into());
+                    return Task::none();
+                }
+                d.searching = true;
+                d.error = None;
+                d.status = None;
+                Task::perform(
+                    async move { crate::youtube::search(&query, crate::config::get().yt_search_results).await },
+                    Message::YtSearched,
+                )
+            }
+
+            Message::YtSearched(res) => {
+                match res {
+                    Ok(results) => {
+                        if let Some(ref mut d) = self.yt_dialog {
+                            d.searching = false;
+                            d.preflight_error = None;
+                            if results.is_empty() {
+                                d.error = Some("No results found.".into());
+                            } else {
+                                d.results = results;
+                                d.status = Some(format!(
+                                    "{} results — Enter to download, ↓/↑ to pick",
+                                    d.results.len()
+                                ));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(ref mut d) = self.yt_dialog {
+                            d.searching = false;
+                            d.error = Some(e);
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::YtSelect(i) => {
+                if let Some(ref mut d) = self.yt_dialog {
+                    d.selected = Some(i);
+                }
+                Task::none()
+            }
+
+            Message::YtDownload(i) => {
+                let Some(ref mut d) = self.yt_dialog else { return Task::none() };
+                if d.downloading.is_some() {
+                    return Task::none();
+                }
+                let Some(r) = d.results.get(i) else { return Task::none() };
+                let url = r.url.clone();
+                let title = r.title.clone();
+                d.downloading = Some(i);
+                d.error = None;
+                d.status = Some(format!("Downloading “{title}”…"));
+                let task = Task::perform(
+                    async move { crate::youtube::download(&url).await },
+                    Message::YtDownloaded,
+                );
+                Task::batch(vec![task, Task::none()])
+            }
+
+            Message::YtDownloaded(res) => {
+                match res {
+                    Ok(path) => {
+                        let msg = match path {
+                            // File names can be long and contain quotes; a
+                            // compact tail is more useful in a small dialog.
+                            Some(p) => {
+                                let name = p
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_default();
+                                let tail: String = name.chars().take(48).collect();
+                                format!("Saved: {tail}")
+                            }
+                            None => "Download complete.".to_string(),
+                        };
+                        if let Some(ref mut d) = self.yt_dialog {
+                            d.downloading = None;
+                            d.status = Some(msg);
+                        }
+                        // Pick the new file up in the library right away.
+                        return Task::done(Message::RescanLibrary);
+                    }
+                    Err(e) => {
+                        if let Some(ref mut d) = self.yt_dialog {
+                            d.downloading = None;
+                            d.error = Some(e);
+                        }
+                    }
+                }
                 Task::none()
             }
 
@@ -1450,18 +1610,29 @@ impl AppState {
 
                 let has_tag_editor = self.show_tag_editor.is_some();
                 let has_playlist_dialog = self.playlist_dialog.is_some();
+                let has_yt_dialog = self.yt_dialog.is_some();
                 let has_shortcuts = self.show_shortcuts;
                 let has_context_menu = self.show_context_menu.is_some();
                 let ctrl = self.modifiers.control() || self.modifiers.command();
 
                 match key {
                     Key::Named(Named::Escape) => {
+                        if has_yt_dialog { return Task::done(Message::CloseYtSearch); }
                         if has_shortcuts { return Task::done(Message::CloseShortcuts); }
                         if has_playlist_dialog { return Task::done(Message::ClosePlaylistDialog); }
                         if has_tag_editor { return Task::done(Message::CloseTagEditor); }
                         if has_context_menu { return Task::done(Message::ToggleContextMenu(None)); }
                     }
                     Key::Named(Named::Enter) => {
+                        if has_yt_dialog {
+                            // Enter downloads the highlighted result if there
+                            // is one, otherwise it runs the search.
+                            let target = self.yt_dialog.as_ref().and_then(|d| d.selected);
+                            return match target {
+                                Some(i) => Task::done(Message::YtDownload(i)),
+                                None => Task::done(Message::YtSubmit),
+                            };
+                        }
                         if has_tag_editor { return Task::done(Message::SaveTags); }
                         if has_playlist_dialog { return Task::done(Message::PlaylistDialogSubmit); }
                         if !has_shortcuts && !has_context_menu {
@@ -1470,11 +1641,28 @@ impl AppState {
                             }
                         }
                     }
-                    Key::Named(Named::Space) if !has_playlist_dialog && !has_tag_editor => {
+                    Key::Named(Named::Space) if !has_playlist_dialog && !has_tag_editor && !has_yt_dialog => {
                         return Task::done(Message::PlayPause);
                     }
                     Key::Named(Named::ArrowRight) => return Task::done(Message::SeekRelative(seek)),
                     Key::Named(Named::ArrowLeft) => return Task::done(Message::SeekRelative(-seek)),
+                    Key::Named(Named::ArrowUp) | Key::Named(Named::ArrowDown) if has_yt_dialog => {
+                        // Move the highlight through the result list instead of
+                        // the (hidden behind the dialog) library cursor.
+                        let dir = if matches!(key, Key::Named(Named::ArrowDown)) { 1i64 } else { -1i64 };
+                        let (len, cur) = match self.yt_dialog.as_ref() {
+                            Some(d) => (d.results.len() as i64, d.selected),
+                            None => (0, None),
+                        };
+                        if len > 0 {
+                            let next = match cur {
+                                None => 0,
+                                Some(c) => (c as i64 + dir).rem_euclid(len),
+                            };
+                            return Task::done(Message::YtSelect(next as usize));
+                        }
+                        return Task::none();
+                    }
                     Key::Named(Named::ArrowUp) => return Task::done(Message::KeyboardArrowUp),
                     Key::Named(Named::ArrowDown) => return Task::done(Message::KeyboardArrowDown),
                     Key::Named(Named::F5) => return Task::done(Message::RescanLibrary),
@@ -1487,6 +1675,11 @@ impl AppState {
                             };
                         }
                     }
+                    // While the YouTube dialog is open, printable characters
+                    // belong to the query box, so library shortcuts must not fire.
+                    // Returning from the whole arm would swallow these keys from
+                    // the text input, so just fall through to no-op.
+                    Key::Character(ref _c) if has_yt_dialog => {}
                     Key::Character(ref c) if !has_playlist_dialog && !has_tag_editor => {
                         match c.as_str() {
                             "n" | "N" => return Task::done(Message::NextTrack),
@@ -1502,6 +1695,7 @@ impl AppState {
                             "a" | "A" => return Task::done(Message::KeyboardAdd),
                             "t" | "T" => return Task::done(Message::ToggleLayout),
                             "v" | "V" => return Task::done(Message::ToggleSpectrum),
+                            "y" | "Y" if !has_yt_dialog => return Task::done(Message::OpenYtSearch),
                             "?" => return Task::done(Message::OpenShortcuts),
                             _ => {}
                         }
@@ -1662,6 +1856,11 @@ impl AppState {
             view_stack = view_stack.push(crate::ui::components::playlist_dialog::view(pd));
         }
 
+        // YouTube search overlay — pushed last so it sits above everything else.
+        if let Some(ref yd) = self.yt_dialog {
+            view_stack = view_stack.push(crate::ui::components::yt_search::view(yd));
+        }
+
         // Shortcuts overlay
         if self.show_shortcuts {
             view_stack = view_stack.push(self.shortcuts_modal_view());
@@ -1728,6 +1927,7 @@ impl AppState {
             row_item("V", "Toggle spectrum visualizer"),
             row_item("←/→", "Seek backward / forward"),
             row_item("↑/↓", "Navigate track list"),
+            row_item("Y", "Search YouTube & download"),
             row_item("F5", "Rescan library"),
             row_item("+ / -", "Volume up / down"),
             row_item("?", "This help"),

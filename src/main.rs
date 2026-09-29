@@ -6,6 +6,7 @@ mod locale;
 mod persist;
 mod state;
 mod ui;
+mod youtube;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LICENSE: &str = include_str!("../LICENSE");
