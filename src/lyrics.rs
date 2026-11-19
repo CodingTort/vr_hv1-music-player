@@ -74,14 +74,25 @@ impl From<&Track> for Query {
 pub async fn load(q: Query) -> Lyrics {
     let local = q.clone();
     // File reads and tag parsing block, so keep them off the async executor.
-    if let Ok(Some(found)) = tokio::task::spawn_blocking(move || load_local(&local)).await {
-        return found;
+    let online = crate::config::get().lyrics_online;
+    let local = tokio::task::spawn_blocking(move || load_local(&local)).await.ok().flatten();
+    // A cached upload with a translation woven in is looked up again (once:
+    // the result replaces it), since a clean one may exist.
+    let stale = match &local {
+        Some(Local::Cached(r)) => online && r.interleaved() && !r.rechecked,
+        _ => false,
+    };
+    match local {
+        Some(Local::File(found)) => return found,
+        Some(Local::Cached(r)) if !stale => return r.into_lyrics(),
+        _ => {}
     }
-    if !crate::config::get().lyrics_online {
+    if !online {
         return Lyrics::NotFound;
     }
     match fetch_lrclib(&q).await {
-        Ok(Some(record)) => {
+        Ok(Some(mut record)) => {
+            record.rechecked = record.interleaved();
             store_cache(&q.path, &record);
             record.into_lyrics()
         }
@@ -90,20 +101,25 @@ pub async fn load(q: Query) -> Lyrics {
     }
 }
 
-fn load_local(q: &Query) -> Option<Lyrics> {
+enum Local {
+    /// A sidecar .lrc or embedded lyrics.
+    File(Lyrics),
+    /// A previous LRCLIB result.
+    Cached(Record),
+}
+
+fn load_local(q: &Query) -> Option<Local> {
     if let Some(found) = std::fs::read_to_string(q.path.with_extension("lrc"))
         .ok()
         .and_then(|text| from_text(&text))
     {
-        return Some(found);
+        return Some(Local::File(found));
     }
     if let Some(found) = embedded_lyrics(&q.path).and_then(|text| from_text(&text)) {
-        return Some(found);
+        return Some(Local::File(found));
     }
     let cached = std::fs::read_to_string(cache_path(&q.path)).ok()?;
-    serde_json::from_str::<Record>(&cached)
-        .ok()
-        .map(Record::into_lyrics)
+    serde_json::from_str::<Record>(&cached).ok().map(Local::Cached)
 }
 
 fn embedded_lyrics(path: &Path) -> Option<String> {
@@ -227,9 +243,24 @@ struct Record {
     instrumental: Option<bool>,
     plain_lyrics: Option<String>,
     synced_lyrics: Option<String>,
+    /// Ours, not LRCLIB's: an interleaved upload kept because a fresh
+    /// lookup found nothing cleaner, so it isn't looked up on every play.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    rechecked: bool,
 }
 
 impl Record {
+    /// Whether the synced lyrics weave a second line (usually a translation)
+    /// in at the same timestamps as the sung ones, for a fifth or more of
+    /// their timestamps.
+    fn interleaved(&self) -> bool {
+        let Some(lines) = self.synced_lyrics.as_deref().and_then(parse_lrc) else { return false };
+        let mut times: Vec<Duration> = lines.iter().filter(|l| !l.text.trim().is_empty()).map(|l| l.time).collect();
+        let total = times.len();
+        times.dedup();
+        total > 0 && (total - times.len()) * 5 >= times.len()
+    }
+
     fn into_lyrics(self) -> Lyrics {
         if let Some(lines) = self.synced_lyrics.as_deref().and_then(parse_lrc) {
             return Lyrics::Synced(lines);
@@ -254,10 +285,17 @@ async fn fetch_lrclib(q: &Query) -> Result<Option<Record>, String> {
     if secs > 0.0 {
         params.push(("duration", duration.as_str()));
     }
+    let mut interleaved_match = None;
     if let Some(body) = lrclib_get("get", &params).await? {
         let record: Record =
             serde_json::from_str(&body).map_err(|e| format!("unexpected LRCLIB response: {e}"))?;
-        return Ok(Some(check_timing(record, secs)));
+        let record = check_timing(record, secs);
+        if !record.interleaved() {
+            return Ok(Some(record));
+        }
+        // A translation woven in on the same timestamps: look for a clean
+        // upload first, and use this one only if there is none.
+        interleaved_match = Some(record);
     }
 
     // 2. A search with the title cleaned up, for tags copied from YouTube
@@ -265,11 +303,17 @@ async fn fetch_lrclib(q: &Query) -> Result<Option<Record>, String> {
     let (artist, title) = search_terms(&q.title, &q.artist);
     let query = format!("{artist} {title}");
     let Some(body) = lrclib_get("search", &[("q", query.trim())]).await? else {
-        return Ok(None);
+        return Ok(interleaved_match);
     };
     let candidates: Vec<Record> =
         serde_json::from_str(&body).map_err(|e| format!("unexpected LRCLIB response: {e}"))?;
     let found = pick(candidates, secs, &title).map(|r| check_timing(r, secs));
+    if found.as_ref().is_some_and(|r| r.synced_lyrics.is_some() && !r.interleaved()) {
+        return Ok(found);
+    }
+    if interleaved_match.is_some() {
+        return Ok(interleaved_match);
+    }
     if found.as_ref().is_some_and(|r| r.synced_lyrics.is_some()) {
         return Ok(found);
     }
@@ -325,10 +369,12 @@ fn pick(candidates: Vec<Record>, secs: f64, title: &str) -> Option<Record> {
     let diff = |r: &Record| (r.duration.unwrap_or(f64::MAX) - secs).abs();
     let has = |s: &Option<String>| s.as_deref().is_some_and(|s| !s.trim().is_empty());
 
+    // Closest length, but an upload with a translation woven in only when
+    // there is no clean one.
     let synced = candidates
         .iter()
         .filter(|r| has(&r.synced_lyrics) && diff(r) <= MAX_DURATION_DIFF)
-        .min_by(|a, b| diff(a).total_cmp(&diff(b)));
+        .min_by(|a, b| a.interleaved().cmp(&b.interleaved()).then(diff(a).total_cmp(&diff(b))));
     if let Some(r) = synced {
         return Some(r.clone());
     }
@@ -723,13 +769,88 @@ pub async fn romaji(q: Query, lines: Vec<LyricLine>, synced: bool) -> Lyrics {
         Ok(ours) => {
             if crate::config::get().lyrics_online {
                 if let Some(found) = find_romaji(&q, &ours).await {
-                    return found;
+                    // The upload has its own uploader's timing; keep the
+                    // timing the Japanese was shown with and take only its
+                    // words, so switching never moves the highlight.
+                    return match found {
+                        Lyrics::Synced(theirs) | Lyrics::Plain(theirs) if synced => {
+                            let romaji: Vec<String> = theirs.iter().map(|l| l.text.clone()).collect();
+                            Lyrics::Synced(retime(&ours, &ours, &theirs, &romaji))
+                        }
+                        other => other,
+                    };
                 }
             }
             if synced { Lyrics::Synced(ours) } else { Lyrics::Plain(ours) }
         }
         Err(e) => Lyrics::Error(e),
     }
+}
+
+/// The Japanese version of lyrics that came in romaji, on the romaji's
+/// timing (see `romaji`): the switch changes the words, never when they come.
+pub async fn japanese(q: Query, lines: Vec<LyricLine>, synced: bool) -> Lyrics {
+    let found = find_japanese(q).await;
+    let (Lyrics::Synced(theirs), true) = (&found, synced) else { return found };
+    // Lining the lines up needs both sides in romaji; without kakasi the
+    // upload is shown as it is.
+    let Ok(theirs_romaji) = romanize(theirs.clone()).await else { return found };
+    let romaji: Vec<String> = theirs_romaji.into_iter().map(|l| l.text).collect();
+    Lyrics::Synced(retime(&lines, &lines, theirs, &romaji))
+}
+
+/// `primary`'s timing with `alt`'s words: each primary line takes the text of
+/// the alt line it matches, comparing both in romaji (`primary_romaji` and
+/// `alt_romaji` are the same lines romanised), in order, so a repeated chorus
+/// pairs up chorus by chorus. A primary line without a counterpart keeps
+/// `fallback`'s line (the same timing, so nothing drifts); alt lines without
+/// one are dropped, as there is no time to show them at.
+pub fn retime(primary: &[LyricLine], fallback: &[LyricLine], alt: &[LyricLine], alt_romaji: &[String]) -> Vec<LyricLine> {
+    let ours: Vec<_> = fallback.iter().map(|l| line_grams(&l.text)).collect();
+    let theirs: Vec<_> = alt_romaji.iter().map(|t| line_grams(t)).collect();
+    let score = |i: usize, j: usize| {
+        let (a, b) = (&ours[i], &theirs[j]);
+        if a.is_empty() || b.is_empty() {
+            return 0.0;
+        }
+        let s = 2.0 * a.intersection(b).count() as f32 / (a.len() + b.len()) as f32;
+        if s >= 0.35 { s } else { 0.0 }
+    };
+    // Best in-order pairing (like a diff, weighted by similarity).
+    let (n, m) = (primary.len(), alt.len().min(alt_romaji.len()));
+    let mut best = vec![vec![0.0f32; m + 1]; n + 1];
+    for i in 1..=n {
+        for j in 1..=m {
+            let pair = match score(i - 1, j - 1) { s if s > 0.0 => best[i - 1][j - 1] + s, _ => 0.0 };
+            best[i][j] = best[i - 1][j].max(best[i][j - 1]).max(pair);
+        }
+    }
+    let mut text: Vec<Option<&str>> = vec![None; n];
+    let (mut i, mut j) = (n, m);
+    while i > 0 && j > 0 {
+        let s = score(i - 1, j - 1);
+        if s > 0.0 && best[i][j] == best[i - 1][j - 1] + s {
+            text[i - 1] = Some(&alt[j - 1].text);
+            i -= 1;
+            j -= 1;
+        } else if best[i][j] == best[i - 1][j] {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+    primary
+        .iter()
+        .zip(fallback)
+        .zip(text)
+        .map(|((p, f), t)| LyricLine { time: p.time, text: t.unwrap_or(&f.text).to_string() })
+        .collect()
+}
+
+/// Every 3-letter run of one line's romaji, normalised like `romaji_grams`.
+fn line_grams(text: &str) -> std::collections::HashSet<String> {
+    let chars: Vec<char> = romaji_letters(text).chars().collect();
+    chars.windows(3).map(|w| w.iter().collect()).collect()
 }
 
 /// A synced romaji upload for this track, checked against `ours` (kakasi's
@@ -779,6 +900,12 @@ async fn find_romaji(q: &Query, ours: &[LyricLine]) -> Option<Lyrics> {
 /// ("tōi", "toui" and "tooi" all read "toi"), so kakasi's run-together words
 /// still match a person's spaced-out ones.
 fn romaji_grams(text: &str) -> std::collections::HashSet<String> {
+    let chars: Vec<char> = romaji_letters(text).chars().collect();
+    chars.windows(5).map(|w| w.iter().collect()).collect()
+}
+
+/// Lowercase letters only, LRC timestamps dropped, long vowels shortened.
+fn romaji_letters(text: &str) -> String {
     let letters: String = text
         .lines()
         .map(|l| l.rsplit(']').next().unwrap_or(l))
@@ -789,11 +916,9 @@ fn romaji_grams(text: &str) -> std::collections::HashSet<String> {
         .filter(|c| c.is_alphabetic())
         .map(|c| match c { 'ā' => 'a', 'ī' => 'i', 'ū' => 'u', 'ē' => 'e', 'ō' => 'o', c => c })
         .collect();
-    let letters = ["ou", "oo", "uu", "aa", "ii", "ee"]
+    ["ou", "oo", "uu", "aa", "ii", "ee"]
         .iter()
-        .fold(letters, |t, long| t.replace(long, &long[..1]));
-    let chars: Vec<char> = letters.chars().collect();
-    chars.windows(5).map(|w| w.iter().collect()).collect()
+        .fold(letters, |t, long| t.replace(long, &long[..1]))
 }
 
 /// Share of `reference`'s fragments that also appear in `other`.
@@ -1100,6 +1225,31 @@ mod tests {
     }
 
     #[test]
+    fn switching_script_keeps_the_timing() {
+        let at = |s: u64, t: &str| LyricLine { time: Duration::from_secs(s), text: t.into() };
+        // The song's own (Japanese) lines, and kakasi's romaji of them.
+        let primary = vec![at(10, "夜空"), at(14, "星"), at(18, "君の声"), at(30, "夜空"), at(34, "星")];
+        let ours = vec![
+            at(10, "yozora ni hikaru"), at(14, "hoshi wo miageta"), at(18, "kiminokoe ga kikoeru"),
+            at(30, "yozora ni hikaru"), at(34, "hoshi wo miageta"),
+        ];
+        // An upload timed differently, with an extra line and one missing.
+        let theirs = vec![
+            at(12, "Yozora ni hikaru"), at(16, "Hoshi o miageta"), at(19, "(la la la)"),
+            at(21, "Kimi no koe ga kikoeru"), at(33, "Yozora ni hikaru"),
+        ];
+        let romaji: Vec<String> = theirs.iter().map(|l| l.text.clone()).collect();
+        let out = retime(&primary, &ours, &theirs, &romaji);
+        let times: Vec<u64> = out.iter().map(|l| l.time.as_secs()).collect();
+        assert_eq!(times, [10, 14, 18, 30, 34], "timing is the song's own");
+        let words: Vec<&str> = out.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(words, [
+            "Yozora ni hikaru", "Hoshi o miageta", "Kimi no koe ga kikoeru",
+            "Yozora ni hikaru", "hoshi wo miageta", // no counterpart: kakasi's line
+        ]);
+    }
+
+    #[test]
     fn name_only_search_rejects_other_songs_of_the_same_name() {
         let rec = |name: &str, artist: &str, duration: f64, synced: &str| Record {
             track_name: Some(name.into()),
@@ -1152,7 +1302,24 @@ mod tests {
             instrumental: Some(false),
             plain_lyrics: Some("words".into()),
             synced_lyrics: synced.then(|| "[00:01.00]words".into()),
+            ..Record::default()
         }
+    }
+
+    #[test]
+    fn clean_uploads_win_over_ones_with_a_translation_woven_in() {
+        // Every sung line followed by its translation at the same time.
+        let woven = "[00:01.00]夜空に星\n[00:01.00]Stars in the night sky\n\
+                     [00:05.00]君の声\n[00:05.00]Your voice\n[00:09.00]遠い道\n[00:09.00]A long road";
+        let clean = "[00:01.20]夜空に星\n[00:05.10]君の声\n[00:09.30]遠い道";
+        let with = |lrc: &str, duration: f64| Record { synced_lyrics: Some(lrc.into()), ..rec("Song", duration, true) };
+        assert!(with(woven, 200.0).interleaved());
+        assert!(!with(clean, 200.0).interleaved());
+        // The woven one is closer in length, the clean one still wins.
+        let got = pick(vec![with(woven, 200.0), with(clean, 201.5)], 200.0, "Song").unwrap();
+        assert_eq!(got.duration, Some(201.5));
+        // With nothing clean, the woven one is still better than nothing.
+        assert!(pick(vec![with(woven, 200.0)], 200.0, "Song").is_some());
     }
 
     #[test]

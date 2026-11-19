@@ -816,24 +816,24 @@ impl AppState {
             return Task::none();
         }
         let path = track.path.clone();
-        if romaji {
-            let (lines, synced) = match self.lyrics.get(&path) {
-                Some(Lyrics::Synced(l)) => (l.clone(), true),
-                Some(Lyrics::Plain(l)) => (l.clone(), false),
-                _ => return Task::none(),
-            };
-            let query = crate::lyrics::Query::from(track);
-            Task::perform(
-                async move { (path, crate::lyrics::romaji(query, lines, synced).await) },
-                |(path, alt)| Message::LyricsAltLoaded(path, alt),
-            )
-        } else {
-            let query = crate::lyrics::Query::from(track);
-            Task::perform(
-                async move { (path, crate::lyrics::find_japanese(query).await) },
-                |(path, alt)| Message::LyricsAltLoaded(path, alt),
-            )
-        }
+        let (lines, synced) = match self.lyrics.get(&path) {
+            Some(Lyrics::Synced(l)) => (l.clone(), true),
+            Some(Lyrics::Plain(l)) => (l.clone(), false),
+            _ => return Task::none(),
+        };
+        let query = crate::lyrics::Query::from(track);
+        // Both directions keep the primary lyrics' timing.
+        Task::perform(
+            async move {
+                let alt = if romaji {
+                    crate::lyrics::romaji(query, lines, synced).await
+                } else {
+                    crate::lyrics::japanese(query, lines, synced).await
+                };
+                (path, alt)
+            },
+            |(path, alt)| Message::LyricsAltLoaded(path, alt),
+        )
     }
 
     /// Sets the playing track's lyrics delay; only meaningful for synced lyrics.

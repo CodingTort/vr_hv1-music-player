@@ -126,7 +126,8 @@ struct State<P: text::Paragraph> {
     fingerprint: u64,
     /// 0‥1 brightness of each line; eases towards 1 for the current line.
     glow: Vec<f32>,
-    active: Option<usize>,
+    /// The lines being sung: one, or several sharing a timestamp.
+    active: Option<std::ops::Range<usize>>,
     hovered: Option<usize>,
     scroll: f32,
     target: f32,
@@ -260,9 +261,12 @@ where
                     state.hold_until = None;
                 }
                 if self.synced {
-                    state.active = active_line(self.lines, shift(self.position, -self.offset));
+                    state.active = active_lines(self.lines, shift(self.position, -self.offset));
                     if state.hold_until.is_none() {
-                        state.target = state.centre_of(state.active.unwrap_or(0));
+                        state.target = match &state.active {
+                            Some(r) => (state.centre_of(r.start) + state.centre_of(r.end - 1)) / 2.0,
+                            None => state.centre_of(0),
+                        };
                     }
                 }
                 if first_frame {
@@ -273,7 +277,7 @@ where
 
                 let mut moving = ease(&mut state.scroll, state.target, GLIDE, dt, 0.5);
                 for (i, glow) in state.glow.iter_mut().enumerate() {
-                    let want = if state.active == Some(i) { 1.0 } else { 0.0 };
+                    let want = if state.active.as_ref().is_some_and(|r| r.contains(&i)) { 1.0 } else { 0.0 };
                     moving |= ease(glow, want, GLOW, dt, 0.01);
                 }
                 state.hovered = self.line_under(state, bounds, cursor);
@@ -411,6 +415,17 @@ fn active_line(lines: &[LyricLine], position: Duration) -> Option<usize> {
     lines.partition_point(|l| l.time <= position).checked_sub(1)
 }
 
+/// The active line together with any lines sharing its timestamp. Some
+/// uploads put a translation (or a romaji line) right before or after each
+/// sung line at the same time; lighting only the last of them would light
+/// the translation for some songs and the words for others.
+fn active_lines(lines: &[LyricLine], position: Duration) -> Option<std::ops::Range<usize>> {
+    let last = active_line(lines, position)?;
+    let time = lines[last].time;
+    let first = lines[..last].iter().rposition(|l| l.time != time).map_or(0, |i| i + 1);
+    Some(first..last + 1)
+}
+
 /// `t` moved by `secs`, stopping at zero.
 fn shift(t: Duration, secs: f32) -> Duration {
     Duration::from_secs_f64((t.as_secs_f64() + secs as f64).max(0.0))
@@ -455,6 +470,10 @@ mod tests {
         assert_eq!(active_line(&lines, Duration::from_secs(10)), Some(2));
         assert_eq!(active_line(&lines, Duration::from_secs(99)), Some(3));
         assert_eq!(active_line(&[], Duration::from_secs(1)), None);
+        // Lines sharing a timestamp light up together.
+        assert_eq!(active_lines(&lines, Duration::from_secs(12)), Some(1..3));
+        assert_eq!(active_lines(&lines, Duration::from_secs(6)), Some(0..1));
+        assert_eq!(active_lines(&lines, Duration::from_secs(0)), None);
     }
 
     #[test]
