@@ -120,6 +120,21 @@ fn clean_error(stderr: &str, stdout: &str) -> String {
 /// Note: this queries YouTube proper. YouTube Music has no public search API,
 /// so results come from the regular YouTube catalogue.
 pub async fn search(query: &str, limit: usize) -> Result<Vec<YtResult>, String> {
+    let results = search_once(query, limit).await?;
+    // YouTube sometimes serves a search-page layout from which the quick
+    // (--flat-playlist) results carry no channel names. Asking again costs
+    // about a second and usually gets them back.
+    if !results.is_empty() && results.iter().all(|r| r.uploader.is_empty()) {
+        if let Ok(again) = search_once(query, limit).await {
+            if again.iter().any(|r| !r.uploader.is_empty()) {
+                return Ok(again);
+            }
+        }
+    }
+    Ok(results)
+}
+
+async fn search_once(query: &str, limit: usize) -> Result<Vec<YtResult>, String> {
     let cfg = crate::config::get();
     if let Some(err) = preflight(cfg) {
         return Err(err);
@@ -130,7 +145,9 @@ pub async fn search(query: &str, limit: usize) -> Result<Vec<YtResult>, String> 
     let out = tokio::time::timeout(
         SEARCH_TIMEOUT,
         Command::new(&cfg.yt_dlp_path)
-            .args(["--no-warnings", "--ignore-config", "-J"])
+            // --flat-playlist reads the results off the search page instead of
+            // loading every video: ~1 s instead of ~30–60 s for 15 results.
+            .args(["--no-warnings", "--ignore-config", "--flat-playlist", "-J"])
             .arg(&target)
             .stdin(Stdio::null())
             .output(),
@@ -178,6 +195,26 @@ pub async fn search(query: &str, limit: usize) -> Result<Vec<YtResult>, String> 
     Ok(results)
 }
 
+/// A search result's thumbnail (a 320×180 JPEG) from YouTube's image server.
+pub async fn thumbnail(id: String) -> Option<Vec<u8>> {
+    let valid = id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !valid {
+        return None;
+    }
+    let out = tokio::time::timeout(
+        Duration::from_secs(15),
+        Command::new("curl")
+            .args(["--silent", "--fail", "--max-time", "10"])
+            .arg(format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"))
+            .stdin(Stdio::null())
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    (out.status.success() && !out.stdout.is_empty()).then_some(out.stdout)
+}
+
 /// Downloads the audio of `url` into the library directory.
 ///
 /// On success returns the final path when yt-dlp reported one. The caller
@@ -193,38 +230,65 @@ pub async fn download(url: &str) -> Result<Option<PathBuf>, String> {
     std::fs::create_dir_all(&dest)
         .map_err(|e| format!("could not create {}: {e}", dest.display()))?;
 
-    let template = dest.join(&cfg.yt_dlp_output);
+    // Partial files and the thumbnail are staged here and only moved into the
+    // library once the download succeeds, so a failure leaves no stray
+    // `.webp` next to the music.
+    let staging = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+        .join(".cache/lavanda/downloading");
+    let home = format!("home:{}", dest.display());
+    let temp = format!("temp:{}", staging.display());
 
-    // `--print after_move:filepath` reports the post-conversion path, but it
-    // lands on stderr alongside the logs, so both streams are captured and the
-    // path is picked out opportunistically. Losing it is not fatal.
-    let out = tokio::time::timeout(
-        DOWNLOAD_TIMEOUT,
-        Command::new(&cfg.yt_dlp_path)
-            .args([
-                "-x",
-                "--audio-format",
-                &cfg.yt_dlp_format,
-                "--audio-quality",
-                &cfg.yt_dlp_quality,
-                "--embed-thumbnail",
-                "--add-metadata",
-                "--no-playlist",
-                "--no-warnings",
-                "--ignore-config",
-                "--no-progress",
-                "--print",
-                "after_move:%(filepath)s",
-                "-o",
-            ])
-            .arg(&template)
-            .arg(url)
-            .stdin(Stdio::null())
-            .output(),
-    )
-    .await
-    .map_err(|_| "download timed out after 15 minutes".to_string())?
-    .map_err(|e| format!("could not run yt-dlp: {e}"))?;
+    // YouTube now and then refuses a stream with HTTP 403. A fresh attempt
+    // fetches new stream URLs and almost always works, so retry a few times.
+    const ATTEMPTS: u32 = 3;
+    let mut attempt = 1;
+    let out = loop {
+        // `--print after_move:filepath` reports the post-conversion path, but
+        // it lands on stderr alongside the logs, so both streams are captured
+        // and the path is picked out opportunistically. Losing it is not fatal.
+        let out = tokio::time::timeout(
+            DOWNLOAD_TIMEOUT,
+            Command::new(&cfg.yt_dlp_path)
+                .args([
+                    "-x",
+                    // Plain stereo audio: everything ends up as stereo
+                    // `yt_dlp_format` anyway, and YouTube's surround streams
+                    // are 3× larger.
+                    "-f",
+                    "bestaudio[audio_channels<=2]/bestaudio",
+                    "--audio-format",
+                    &cfg.yt_dlp_format,
+                    "--audio-quality",
+                    &cfg.yt_dlp_quality,
+                    "--embed-thumbnail",
+                    "--add-metadata",
+                    "--no-playlist",
+                    "--no-warnings",
+                    "--ignore-config",
+                    "--no-progress",
+                    "--print",
+                    "after_move:%(filepath)s",
+                    "-P",
+                    &home,
+                    "-P",
+                    &temp,
+                    "-o",
+                    &cfg.yt_dlp_output,
+                ])
+                .arg(url)
+                .stdin(Stdio::null())
+                .output(),
+        )
+        .await
+        .map_err(|_| "download timed out after 15 minutes".to_string())?
+        .map_err(|e| format!("could not run yt-dlp: {e}"))?;
+
+        let refused = String::from_utf8_lossy(&out.stderr).contains("HTTP Error 403");
+        if out.status.success() || !refused || attempt == ATTEMPTS {
+            break out;
+        }
+        attempt += 1;
+    };
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);

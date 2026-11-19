@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Default)]
 pub struct SavedState {
     pub volume: Option<f32>,
+    pub show_lyrics: Option<bool>,
+    pub lyrics_width: Option<f32>,
+    pub lyrics_romaji: Option<bool>,
 }
 
 fn state_path() -> PathBuf {

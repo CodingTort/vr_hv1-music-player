@@ -58,7 +58,7 @@ pub fn view(state: &PlaylistDialogState) -> Element<'_, Message> {
                     .map(|pl| {
                         let is_sel = selected_pl.as_deref() == Some(pl.as_str());
                         let msg = Message::PlaylistDialogSelect(pl.clone());
-                        button(text(pl).size(13).color(if is_sel { theme::accent() } else { theme::text() }))
+                        button(text(pl).size(13).color(if is_sel { theme::accent() } else { theme::text() }).shaping(iced::widget::text::Shaping::Advanced))
                             .on_press(msg)
                             .style(iced::widget::button::text)
                             .width(Length::Fill)
@@ -81,7 +81,7 @@ pub fn view(state: &PlaylistDialogState) -> Element<'_, Message> {
             let track_name = track.title.clone();
 
             column![
-                text(format!("Adding: {track_name}")).size(12).color(theme::subtext()),
+                text(format!("Adding: {track_name}")).size(12).color(theme::subtext()).shaping(iced::widget::text::Shaping::Advanced),
                 Space::with_height(8),
                 list_col,
                 Space::with_height(8),
@@ -126,7 +126,7 @@ pub fn view(state: &PlaylistDialogState) -> Element<'_, Message> {
         border: iced::Border {
             color: theme::accent(),
             width: 1.0,
-            radius: 8.0.into(),
+            radius: crate::ui::theme::corner_radius().into(),
         },
         shadow: iced::Shadow {
             color: theme::base(),

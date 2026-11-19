@@ -1,4 +1,5 @@
 pub mod controls;
+pub mod lyrics;
 pub mod playlist_dialog;
 pub mod progress;
 pub mod settings;

@@ -321,9 +321,29 @@ fn decode_file(
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| anyhow!("Decoder: {e}"))?;
 
-    // Emite Progress no máximo a cada 250 ms: o suficiente para a barra e o
-    // relógio, sem inundar a UI com um evento por packet (~38/s em MP3).
+    // Total length, when the file states it. Some don't (e.g. a FLAC written
+    // to a pipe): Progress then carries a zero duration and the app falls
+    // back to the length from the tags.
+    let duration = match (time_base, n_frames) {
+        (Some(tb), Some(nf)) => {
+            Duration::from_secs_f64(nf as f64 * tb.numer as f64 / tb.denom as f64)
+        }
+        _ => Duration::ZERO,
+    };
+
+    // Reports what is audible, not what has been decoded: up to a second of
+    // audio waits in `pcm` (`pending` frames). At most every 100 ms: fine-
+    // grained enough for synced lyrics to switch lines on time, without one
+    // event per packet (~38/s for MP3).
     let mut next_emit = Duration::ZERO;
+    let mut report = |decoded: u64, pending: u64| {
+        let heard = decoded.saturating_sub(pending);
+        let position = Duration::from_secs_f64(heard as f64 / OUTPUT_RATE as f64);
+        if position >= next_emit {
+            let _ = event_tx.send(AudioEvent::Progress { position, duration });
+            next_emit = position + Duration::from_millis(100);
+        }
+    };
 
     let mut sample_count = if let Some(pos) = seek_to {
         let seek_time = SymphoniaTime {
@@ -412,16 +432,8 @@ fn decode_file(
         }
 
         sample_count += samples.len() as u64 / 2;
-
-        if let (Some(tb), Some(nf)) = (time_base, n_frames) {
-            let position = Duration::from_secs_f64(sample_count as f64 / OUTPUT_RATE as f64);
-            if position >= next_emit {
-                let duration =
-                    Duration::from_secs_f64(nf as f64 * tb.numer as f64 / tb.denom as f64);
-                let _ = event_tx.send(AudioEvent::Progress { position, duration });
-                next_emit = position + Duration::from_millis(250);
-            }
-        }
+        // This packet is counted but not queued yet.
+        report(sample_count, (pcm.lock().unwrap().len() + samples.len()) as u64 / 2);
 
         loop {
             if cancel.load(Ordering::SeqCst) {
@@ -436,7 +448,19 @@ fn decode_file(
         pcm.lock().unwrap().extend(samples);
     }
 
-    Ok(true)
+    // Let the buffered tail play out before reporting the end: the next
+    // track's Play clears `pcm`, which used to cut off the last second.
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+        let pending = pcm.lock().unwrap().len() as u64 / 2;
+        report(sample_count, pending);
+        if pending == 0 {
+            return Ok(true);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn resample_stereo(input: &[f32], in_rate: u32, out_rate: u32) -> Vec<f32> {

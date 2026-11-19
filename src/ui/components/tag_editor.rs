@@ -107,7 +107,7 @@ pub fn view(state: &TagEditorState) -> Element<'_, Message> {
                 .style(iced::widget::button::text),
             ]
             .align_y(Alignment::Center),
-            text(subtitle).size(12).color(theme::subtext()),
+            text(subtitle).size(12).color(theme::subtext()).shaping(iced::widget::text::Shaping::Advanced),
             Space::with_height(12),
             hint,
             Space::with_height(12),
@@ -121,7 +121,7 @@ pub fn view(state: &TagEditorState) -> Element<'_, Message> {
     .width(500)
     .style(|_| iced::widget::container::Style {
         background: Some(iced::Background::Color(theme::mantle())),
-        border: iced::Border { color: theme::accent(), width: 1.0, radius: 8.0.into() },
+        border: iced::Border { color: theme::accent(), width: 1.0, radius: crate::ui::theme::corner_radius().into() },
         shadow: iced::Shadow {
             color: theme::base(),
             offset: iced::Vector { x: 0.0, y: 4.0 },

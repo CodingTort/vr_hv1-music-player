@@ -1,5 +1,8 @@
 use iced::{font::Weight, Font};
 
+/// The text font (see README-fork.md for installing it).
+pub const TEXT_FONT_FAMILY: &str = "UDEV Gothic NF";
+
 /// Fonte Nerd Font carregada do sistema.
 /// Qualquer Nerd Font instalada (JetBrainsMono, FiraCode, Hack, etc.) funciona.
 pub const NERD_FONT: Font = Font {
@@ -14,9 +17,11 @@ pub const NERD_FONT_MONO: Font = Font {
     ..NERD_FONT
 };
 
-/// Fonte base da UI — mesma família do Waybar/Omarchy.
+/// Fonte base da UI. UDEV Gothic NF is JetBrains Mono with matching
+/// Japanese (BIZ UD Gothic) in one family, so mixed text no longer falls back
+/// to a different-looking font for kana and kanji.
 pub const UI_FONT: Font = Font {
-    family: iced::font::Family::Name("JetBrainsMono Nerd Font Mono"),
+    family: iced::font::Family::Name(TEXT_FONT_FAMILY),
     weight: Weight::Normal,
     stretch: iced::font::Stretch::Normal,
     style: iced::font::Style::Normal,
@@ -46,3 +51,7 @@ pub const ICON_CLOCK: &str = "\u{f017}"; //
 pub const ICON_LIST: &str = "\u{f0ca}"; //
 pub const ICON_CLOSE: &str = "\u{f00d}"; //
 pub const ICON_SETTINGS: &str = "\u{f013}"; //
+pub const ICON_LYRICS: &str = "\u{f130}"; //  (microphone)
+pub const ICON_EXPORT: &str = "\u{f093}"; //  (upload)
+pub const ICON_IMPORT: &str = "\u{f019}"; //  (download)
+pub const ICON_YOUTUBE: &str = "\u{f05c3}"; // 󰗃 (YouTube, Material Design)

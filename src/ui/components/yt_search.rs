@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, text, text_input, scrollable, Space};
+use iced::widget::{button, column, container, image, row, text, text_input, scrollable, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{Message, YtSearchState};
@@ -31,6 +31,11 @@ pub fn view(state: &YtSearchState) -> Element<'_, Message> {
     };
 
     let header = row![
+        text(crate::ui::icons::ICON_YOUTUBE)
+            .font(crate::ui::icons::NERD_FONT_MONO)
+            .size(24)
+            .color(iced::Color::from_rgb8(0xff, 0x33, 0x33)),
+        Space::with_width(8),
         text("YouTube")
             .size(16)
             .font(crate::ui::icons::UI_FONT_BOLD)
@@ -116,7 +121,12 @@ pub fn view(state: &YtSearchState) -> Element<'_, Message> {
             }
             let meta_text = meta.join("  ·  ");
 
-            let action = if is_busy {
+            let saved = state.saved.contains(&i);
+            let action = if saved {
+                button(text("✓ Saved").size(11).color(theme::green()))
+                    .style(iced::widget::button::text)
+                    .padding([4, 10])
+            } else if is_busy {
                 button(text("Downloading…").size(11))
                     .style(theme::secondary_button)
                     .padding([4, 10])
@@ -127,32 +137,53 @@ pub fn view(state: &YtSearchState) -> Element<'_, Message> {
                     .padding([4, 10])
             };
 
+            // Thumbnail (or a placeholder while it loads), 16:9.
+            let thumb: Element<Message> = match state.thumbs.get(&r.id) {
+                Some(handle) => image(handle.clone()).width(96).height(54).into(),
+                None => container(Space::new(96, 54)).style(theme::card).into(),
+            };
+
             items.push(
                 button(
                     row![
                         index_label,
+                        thumb,
                         column![
-                            text(title_text).size(13).color(title_color),
-                            text(meta_text).size(11).color(theme::subtext()),
+                            text(title_text).size(13).color(title_color).shaping(iced::widget::text::Shaping::Advanced),
+                            text(meta_text).size(11).color(theme::subtext()).shaping(iced::widget::text::Shaping::Advanced),
                         ]
                         .spacing(2)
                         .width(Length::Fill),
                         action,
                     ]
-                    .spacing(8)
+                    .spacing(10)
                     .align_y(Alignment::Center)
                     .width(Length::Fill)
-                    .padding([4, 6]),
+                    .padding([6, 8]),
                 )
                 .on_press(Message::YtSelect(i))
-                .style(iced::widget::button::text)
+                // The selected result is a lit card; the rest highlight on hover.
+                .style(move |_, status| {
+                    let hovered = matches!(status, iced::widget::button::Status::Hovered);
+                    let tint = if is_sel { 0.14 } else if hovered { 0.06 } else { 0.0 };
+                    iced::widget::button::Style {
+                        background: Some(iced::Background::Color(theme::with_alpha(theme::accent(), tint))),
+                        border: iced::Border {
+                            color: if is_sel { theme::with_alpha(theme::accent(), 0.6) } else { iced::Color::TRANSPARENT },
+                            width: 1.0,
+                            radius: theme::corner_radius().into(),
+                        },
+                        text_color: theme::text(),
+                        ..Default::default()
+                    }
+                })
                 .width(Length::Fill)
                 .into(),
             );
         }
 
-        scrollable(column(items).spacing(2))
-            .height(Length::Fixed(340.0))
+        scrollable(column(items).spacing(4))
+            .height(Length::Fixed(380.0))
             .width(Length::Fill)
             .into()
     };
@@ -172,7 +203,7 @@ pub fn view(state: &YtSearchState) -> Element<'_, Message> {
         } else {
             theme::subtext()
         };
-        footer = footer.push(text(st.clone()).size(11).color(color).width(Length::Fill));
+        footer = footer.push(text(st.clone()).size(11).color(color).width(Length::Fill).shaping(iced::widget::text::Shaping::Advanced));
     }
 
     let body = column![
@@ -211,13 +242,14 @@ fn shell(body: impl Into<Element<'static, Message>>) -> Element<'static, Message
     let body = body.into();
 
     let card = container(body)
-        .width(520)
+        .width(640)
+        .padding(20)
         .style(|_| iced::widget::container::Style {
             background: Some(iced::Background::Color(theme::mantle())),
             border: iced::Border {
                 color: theme::accent(),
                 width: 1.0,
-                radius: 8.0.into(),
+                radius: crate::ui::theme::corner_radius().into(),
             },
             shadow: iced::Shadow {
                 color: theme::base(),

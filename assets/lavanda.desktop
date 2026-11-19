@@ -1,10 +1,11 @@
 [Desktop Entry]
-Name=lavanda
+Name=Tort's Music Player
 GenericName=Music Player
-Comment=Native Wayland music player with Catppuccin theme
+Comment=Native Wayland music player with synced lyrics
 Exec=lavanda
-Icon=audio-x-generic
+Icon=tort-music-player
+StartupWMClass=lavanda
 Type=Application
 Categories=AudioVideo;Audio;Music;Player;
 Terminal=false
-Keywords=music;audio;player;wayland;
+Keywords=music;audio;player;wayland;lyrics;lavanda;

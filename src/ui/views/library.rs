@@ -1,6 +1,8 @@
 use iced::widget::{
     button, column, container, mouse_area, row, scrollable, text, text_input, Space,
 };
+// Names and titles can be in any script; Basic shaping has no font fallback.
+use iced::widget::text::Shaping;
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, ContextMenuTarget, Message, PlaylistDialogMode, PlaylistTab, SortColumn, ViewMode};
@@ -15,18 +17,18 @@ const LIKE_COL_W: f32 = 60.0;
 pub fn view(state: &AppState) -> Element<'_, Message> {
     let sidebar = sidebar_view(state);
 
-    let drag_handle = mouse_area(
-        container(Space::new(Length::Fixed(8.0), Length::Fill)).style(|_| {
-            iced::widget::container::Style {
-                background: Some(iced::Background::Color(theme::surface0())),
-                ..Default::default()
-            }
-        }),
-    )
-    .interaction(iced::mouse::Interaction::ResizingHorizontally)
-    .on_press(Message::SidebarDragStart);
+    // The gap between the cards is the handle: invisible, but it shows the
+    // resize cursor and can be dragged.
+    let drag_handle = mouse_area(Space::new(Length::Fixed(8.0), Length::Fill))
+        .interaction(iced::mouse::Interaction::ResizingHorizontally)
+        .on_press(Message::SidebarDragStart);
 
-    let track_list = track_list_view(state);
+    // The track list is a card like the sidebar and the lyrics panel.
+    let card = if state.glass_surfaces() { theme::sidebar_glass } else { theme::sidebar };
+    let track_list = container(track_list_view(state))
+        .style(card)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     row![sidebar, drag_handle, track_list]
         .width(Length::Fill)
@@ -42,15 +44,17 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
         let color = if active { theme::accent() } else { theme::subtext() };
         button(
             row![
-                text(icon).font(icons::NERD_FONT_MONO).size(24).color(color),
-                text(label).size(12).color(color),
+                text(icon).font(icons::NERD_FONT_MONO).size(14).color(color),
+                text(label).size(11).color(color),
             ]
-            .spacing(4)
+            .spacing(2)
             .align_y(Alignment::Center),
         )
         .on_press(Message::SelectViewMode(mode))
         .style(iced::widget::button::text)
-        .padding([4, 6])
+        // Compact enough that all three tabs fit the default 200 px sidebar
+        // (they used to wrap "Genres" letter by letter).
+        .padding([4, 3])
         .into()
     };
 
@@ -59,7 +63,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
         tab_btn("Albums", ViewMode::Albums, icons::ICON_LIST),
         tab_btn("Genres", ViewMode::Genres, icons::ICON_PODIUM),
     ]
-    .spacing(4);
+    .spacing(0);
 
     let sidebar_search = row![
         text(icons::ICON_SEARCH)
@@ -109,16 +113,17 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
 
     let playlist_panel = playlist_panel_view(state);
 
+    // A hairline divider with a taller invisible grab area around it.
     let pl_resize = mouse_area(
         container(
-            container(Space::new(Length::Fill, Length::Fixed(8.0))).style(move |_| {
+            container(Space::new(Length::Fill, Length::Fixed(1.0))).style(move |_| {
                 iced::widget::container::Style {
                     background: Some(iced::Background::Color(theme::surface0())),
                     ..Default::default()
                 }
             }),
         )
-        .padding([2, 0]),
+        .padding([5, 10]),
     )
     .interaction(iced::mouse::Interaction::ResizingVertically)
     .on_press(Message::PlaylistDragStart);
@@ -170,7 +175,7 @@ fn build_sidebar_list(
 
             let ctx = make_ctx.map(|f| f(name.clone()));
             let msg = make_msg(name.clone());
-            let btn = button(text(name).color(color).size(13).width(Length::Fill))
+            let btn = button(text(name).color(color).size(13).width(Length::Fill).shaping(Shaping::Advanced))
                 .on_press(msg)
                 .style(iced::widget::button::text)
                 .width(Length::Fill)
@@ -218,6 +223,16 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
         .style(iced::widget::button::text)
         .padding([3, 6]),
         Space::with_width(Length::Fill),
+        // Import a playlist file (CSV of YouTube ids).
+        button(
+            text(icons::ICON_IMPORT)
+                .font(icons::NERD_FONT_MONO)
+                .size(20)
+                .color(theme::subtext()),
+        )
+        .on_press(Message::ImportPlaylist)
+        .style(iced::widget::button::text)
+        .padding([3, 6]),
         button(
             text(icons::ICON_PLUS)
                 .font(icons::NERD_FONT_MONO)
@@ -256,15 +271,28 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
                     let is_sel = selected_pl.as_deref() == Some(pl.as_str());
 
                     let delete_btn: Element<Message> = if is_sel {
-                        button(
-                            text(icons::ICON_TRASH)
-                                .font(icons::NERD_FONT_MONO)
-                                .size(22)
-                                .color(theme::red()),
-                        )
-                        .on_press(Message::DeletePlaylist(pl.clone()))
-                        .style(iced::widget::button::text)
-                        .padding([2, 4])
+                        row![
+                            // Export as a CSV of YouTube ids.
+                            button(
+                                text(icons::ICON_EXPORT)
+                                    .font(icons::NERD_FONT_MONO)
+                                    .size(18)
+                                    .color(theme::subtext()),
+                            )
+                            .on_press(Message::ExportPlaylist(pl.clone()))
+                            .style(iced::widget::button::text)
+                            .padding([2, 4]),
+                            button(
+                                text(icons::ICON_TRASH)
+                                    .font(icons::NERD_FONT_MONO)
+                                    .size(22)
+                                    .color(theme::red()),
+                            )
+                            .on_press(Message::DeletePlaylist(pl.clone()))
+                            .style(iced::widget::button::text)
+                            .padding([2, 4]),
+                        ]
+                        .align_y(Alignment::Center)
                         .into()
                     } else {
                         Space::with_width(20).into()
@@ -277,7 +305,8 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
                             text(pl_label)
                                 .size(12)
                                 .color(if is_sel { theme::accent() } else { theme::text() })
-                                .width(Length::Fill),
+                                .width(Length::Fill)
+                                .shaping(Shaping::Advanced),
                             delete_btn,
                         ]
                         .spacing(4)
@@ -430,7 +459,8 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
                         .size(12)
                         .color(theme::accent())
                         .font(icons::UI_FONT_BOLD)
-                        .width(Length::Fill),
+                        .width(Length::Fill)
+                        .shaping(Shaping::Advanced),
                     text(format!("{count} tracks")).size(11).color(theme::overlay0()),
                 ]
                 .spacing(8)
@@ -586,7 +616,6 @@ fn toolbar_view(state: &AppState) -> Element<'_, Message> {
             checkbox("Artist", state.filter_artist).on_toggle(|_| Message::ToggleFilterArtist).size(12).text_size(11),
             checkbox("Album", state.filter_album).on_toggle(|_| Message::ToggleFilterAlbum).size(12).text_size(11),
             checkbox("Genre", state.filter_genre).on_toggle(|_| Message::ToggleFilterGenre).size(12).text_size(11),
-            Space::with_width(Length::Fill),
             group_btn,
             restore_btn,
             button(text("?").size(12).color(theme::subtext()))
@@ -596,7 +625,10 @@ fn toolbar_view(state: &AppState) -> Element<'_, Message> {
         ]
         .spacing(4)
         .align_y(Alignment::Center)
-        .padding([4, 12]),
+        .padding([4, 12])
+        // Flows onto a second line when the track list is narrow, instead of
+        // squeezing the labels into vertical letters.
+        .wrap(),
     )
     .style(|_| iced::widget::container::Style {
         background: Some(iced::Background::Color(theme::with_alpha(theme::mantle(), 0.7))),
@@ -652,7 +684,7 @@ fn build_track_row(
                 TableColumn::Artist | TableColumn::Album | TableColumn::Genre => theme::subtext(),
                 _ => theme::subtext(),
             };
-            text(cell_text).size(13).color(cell_color).width(w).into()
+            text(cell_text).size(13).color(cell_color).width(w).shaping(Shaping::Advanced).into()
         })
         .collect();
 

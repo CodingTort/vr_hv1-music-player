@@ -68,6 +68,7 @@ pub fn scan_folder(dir: &Path) -> Vec<Track> {
                 play_count,
                 liked,
                 date_played: None,
+                yt_id: info.yt_id,
             }
         })
         .collect()
@@ -101,6 +102,7 @@ struct TrackInfo {
     duration_ms: u64,
     genre: String,
     year: Option<u32>,
+    yt_id: Option<String>,
 }
 
 fn read_tags(path: &Path) -> Result<TrackInfo> {
@@ -155,6 +157,10 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
 
     let year = tags.and_then(|t| t.year());
 
+    // yt-dlp stores the video URL in a comment-like tag; which one depends on
+    // the format, so look through every text tag.
+    let yt_id = tags.and_then(|t| t.items().filter_map(|i| i.value().text()).find_map(youtube_id));
+
     Ok(TrackInfo {
         title,
         artist,
@@ -164,7 +170,19 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
         duration_ms,
         genre,
         year,
+        yt_id,
     })
+}
+
+/// The 11-character video id in a YouTube URL (`watch?v=…`, `youtu.be/…`,
+/// `music.youtube.com/watch?v=…`, `shorts/…`), if `text` contains one.
+pub fn youtube_id(text: &str) -> Option<String> {
+    let rest = ["watch?v=", "youtu.be/", "/shorts/"].iter().find_map(|m| {
+        let i = text.find(m)?;
+        text[..i + m.len()].contains("youtu").then(|| &text[i + m.len()..])
+    })?;
+    let id: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    (id.len() == 11).then_some(id)
 }
 
 /// Escreve metadados no arquivo de áudio.

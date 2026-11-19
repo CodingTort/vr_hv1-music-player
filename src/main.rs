@@ -3,8 +3,11 @@ mod audio;
 mod config;
 mod library;
 mod locale;
+mod lyrics;
 mod persist;
+mod playlist_io;
 mod state;
+mod tray;
 mod ui;
 mod youtube;
 

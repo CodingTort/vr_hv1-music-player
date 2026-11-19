@@ -1,4 +1,6 @@
 use iced::widget::{button, column, container, image, row, text, Space};
+// Track tags can be in any script; Basic shaping has no font fallback.
+use iced::widget::text::Shaping;
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Message};
@@ -20,7 +22,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         let artist_btn = button(
             text(&track.artist)
                 .color(theme::subtext())
-                .size(13),
+                .size(13)
+                .shaping(Shaping::Advanced),
         )
         .on_press(Message::FocusArtistName)
         .style(iced::widget::button::text)
@@ -30,19 +33,20 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             text(&track.title)
                 .color(theme::text())
                 .size(20)
-                .font(icons::UI_FONT_BOLD),
+                .font(icons::UI_FONT_BOLD)
+                .shaping(Shaping::Advanced),
         )
         .on_press(Message::FocusSongName)
         .style(iced::widget::button::text)
         .padding(0);
 
-        let album_label = format!(
-            "{} ({})",
-            track.album,
-            track.track_number.map(|n| n.to_string()).unwrap_or_default()
-        );
+        // "Album (3)", or just "Album" when there is no track number.
+        let album_label = match track.track_number {
+            Some(n) => format!("{} ({n})", track.album),
+            None => track.album.clone(),
+        };
         let album_btn = button(
-            text(album_label).color(theme::subtext()).size(13),
+            text(album_label).color(theme::subtext()).size(13).shaping(Shaping::Advanced),
         )
         .on_press(Message::FocusAlbumName)
         .style(iced::widget::button::text)
@@ -65,16 +69,14 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     };
 
     // Capa do álbum
-    let cover: Element<Message> = if let Some(data) = state
-        .current_track
-        .as_ref()
-        .and_then(|t| t.cover_data.as_ref())
-    {
-        let handle = image::Handle::from_bytes(data.clone());
-        image(handle)
-            .width(180)
-            .height(180)
-            .content_fit(iced::ContentFit::Cover)
+    let size = state.cover_size;
+    let cover: Element<Message> = if let Some(handle) = state.cover_rounded.clone().or_else(|| state.cover.clone()) {
+        // The rounded copy arrives a moment after the track starts; the
+        // frame's corners match it (the radius is scaled with the cover).
+        let radius = theme::corner_radius() * size / state.cover_size;
+        container(image(handle).width(size).height(size).content_fit(iced::ContentFit::Cover))
+            .padding(2)
+            .style(theme::cover_frame(radius + 2.0))
             .into()
     } else {
         container(
@@ -83,8 +85,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                 .color(theme::overlay0())
                 .size(96),
         )
-        .width(180)
-        .height(180)
+        .width(size)
+        .height(size)
         .align_x(iced::alignment::Horizontal::Center)
         .align_y(iced::alignment::Vertical::Center)
         .style(theme::card)
@@ -114,8 +116,9 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             .push(spectrum::spectrum_view(
                 &state.spectrum,
                 state.volume,
+                state.spectrum_style == "mirrored",
                 Length::FillPortion(3),
-                Length::Fixed(180.0),
+                Length::Fixed(size),
             ));
     } else {
         player_row = player_row.push(info_col.width(Length::Fill));

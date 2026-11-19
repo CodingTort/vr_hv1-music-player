@@ -26,6 +26,11 @@ pub enum MprisUpdate {
     Loop(LoopStatus),
 }
 
+/// The player's display name: window title, header, notifications and the
+/// MPRIS identity. Defined here, not in app.rs, because lavanda-tui compiles
+/// this file too. (The MPRIS bus name stays `lavanda` for playerctl.)
+pub const APP_NAME: &str = "Tort's Music Player";
+
 pub fn launch(
     cmd_tx: mpsc::UnboundedSender<MprisCommand>,
     mut update_rx: mpsc::UnboundedReceiver<MprisUpdate>,
@@ -41,7 +46,7 @@ pub fn launch(
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async move {
             let player = match Player::builder("lavanda")
-                .identity("lavanda")
+                .identity(APP_NAME)
                 .can_play(true)
                 .can_pause(true)
                 .can_go_next(true)

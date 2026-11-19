@@ -40,7 +40,7 @@ pub fn playback_controls<'a>(
     };
 
     let vol_slider = slider(0.0..=1.0f32, volume, Message::VolumeChanged)
-        .step(0.01)
+        .step(0.01_f32)
         .width(100);
 
     row![

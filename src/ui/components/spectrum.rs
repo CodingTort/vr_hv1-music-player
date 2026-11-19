@@ -10,6 +10,9 @@ struct SpectrumCanvas {
     /// Output volume (0.0–1.0). Scales bar heights on top of the FFT
     /// amplitude so the visualizer visibly tracks the volume slider.
     gain: f32,
+    /// Bars grow both up and down from a centre line instead of up from
+    /// the bottom.
+    mirrored: bool,
 }
 
 impl canvas::Program<Message> for SpectrumCanvas {
@@ -38,6 +41,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
         let x_offset = (bounds.width - n_bars as f32 * SLOT) / 2.0;
 
         let bottom_y = bounds.height;
+        let centre_y = bounds.height / 2.0;
         for i in 0..n_bars {
             // Evenly resample src into n_bars
             let src_idx = i * src.len() / n_bars;
@@ -54,10 +58,12 @@ impl canvas::Program<Message> for SpectrumCanvas {
             let gain = self.gain.max(0.1);
             let bar_h = (amp * gain).clamp(0.0, 1.0) * bounds.height * 0.88;
 
-            let path = Path::rectangle(
-                Point::new(x, bottom_y - bar_h),
-                Size::new(BAR_W, bar_h),
-            );
+            let path = if self.mirrored {
+                // Same overall height, split evenly above and below.
+                Path::rectangle(Point::new(x, centre_y - bar_h / 2.0), Size::new(BAR_W, bar_h))
+            } else {
+                Path::rectangle(Point::new(x, bottom_y - bar_h), Size::new(BAR_W, bar_h))
+            };
             frame.fill(&path, self.accent);
         }
 
@@ -68,6 +74,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
 pub fn spectrum_view(
     bins: &[f32],
     gain: f32,
+    mirrored: bool,
     width: Length,
     height: Length,
 ) -> Element<'_, Message> {
@@ -75,6 +82,7 @@ pub fn spectrum_view(
         bins: bins.to_vec(),
         accent: theme::accent(),
         gain: gain.clamp(0.0, 1.0),
+        mirrored,
     })
     .width(width)
     .height(height)

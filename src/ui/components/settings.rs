@@ -15,8 +15,11 @@ pub fn view<'a>(
     background_gradient_angle: f32,
     background_image: &'a str,
     corner_radius: f32,
+    spectrum_style: &'a str,
+    cover_size: f32,
 ) -> Element<'a, Message> {
     const THEME_MODES: &[&str] = &["auto", "manual"];
+    const SPECTRUM_STYLES: &[&str] = &["mirrored", "bottom"];
     const BG_KINDS: &[&str] = &["none", "color", "gradient", "image", "album"];
     let presets = theme::get_available_presets();
 
@@ -51,6 +54,20 @@ pub fn view<'a>(
                 .width(Length::Fill),
             text(format!("{:.1}px", corner_radius)).color(theme::text()).size(13).width(Length::Fixed(48.0)),
         ].spacing(8).align_y(Alignment::Center),
+        row![
+            text("Cover Size").color(theme::text()).size(13).width(Length::Fixed(120.0)),
+            iced::widget::slider(140.0..=400.0, cover_size, Message::SettingsCoverSizeChanged)
+                .step(10.0_f32)
+                .width(Length::Fill),
+            text(format!("{cover_size:.0}px")).color(theme::text()).size(13).width(Length::Fixed(48.0)),
+        ].spacing(8).align_y(Alignment::Center),
+        row![
+            text("Spectrum").color(theme::text()).size(13).width(Length::Fixed(120.0)),
+            pick_list(SPECTRUM_STYLES, Some(spectrum_style), |s| Message::SettingsSpectrumStyleChanged(s.to_string()))
+                .style(theme::pick_list)
+                .padding([4, 8])
+                .width(Length::Fill),
+        ].spacing(12).align_y(Alignment::Center),
         row![
             Space::with_width(Length::Fixed(120.0)),
             checkbox("Use glassmorphism", use_glassmorphism)
@@ -125,7 +142,7 @@ pub fn view<'a>(
         .width(560)
         .style(|_| iced::widget::container::Style {
             background: Some(iced::Background::Color(theme::base())),
-            border: iced::Border { color: theme::accent(), width: 1.0, radius: 8.0.into() },
+            border: iced::Border { color: theme::accent(), width: 1.0, radius: crate::ui::theme::corner_radius().into() },
             shadow: iced::Shadow {
                 color: theme::mantle(),
                 offset: iced::Vector { x: 0.0, y: 4.0 },

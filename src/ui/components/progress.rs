@@ -29,9 +29,14 @@ pub fn progress_bar<'a>(position: Duration, duration: Duration) -> Element<'a, M
             .color(theme::subtext())
             .size(13),
         bar,
-        text(fmt_duration(duration))
-            .color(theme::subtext())
-            .size(13),
+        // Playing something whose length nobody knows.
+        text(if duration.is_zero() && !position.is_zero() {
+            "--:--".to_string()
+        } else {
+            fmt_duration(duration)
+        })
+        .color(theme::subtext())
+        .size(13),
     ]
     .spacing(8)
     .align_y(Alignment::Center)

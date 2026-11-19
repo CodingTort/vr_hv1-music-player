@@ -32,6 +32,12 @@ pub struct Config {
     pub background_gradient_to: String,
     pub background_gradient_angle: f32,
     pub background_image: String, // empty = none
+    // Lyrics: look up lyrics on lrclib.net when none are found locally
+    pub lyrics_online: bool,
+    // Spectrum bars: "mirrored" (above and below a centre line) | "bottom"
+    pub spectrum_style: String,
+    // Album cover size in the player panel, in pixels (focus layout: 1.4×)
+    pub cover_size: f32,
 }
 
 impl Default for Config {
@@ -59,6 +65,9 @@ impl Default for Config {
             background_gradient_to: "#0f0e17".into(),
             background_gradient_angle: 135.0,
             background_image: String::new(),
+            lyrics_online: true,
+            spectrum_style: "mirrored".into(),
+            cover_size: 240.0,
         }
     }
 }
@@ -124,4 +133,4 @@ pub fn expand_tilde(path: &str) -> PathBuf {
 
 // ── Config padrão gerada na primeira execução ─────────────────────────────────
 
-const DEFAULT_CONFIG: &str = "# lavanda - configuration file\n# ~/.config/lavanda/config.toml\n\nmusic_dir = \"~/Music\"\nvolume = 0.8\nshuffle = false\nrepeat = false\nlanguage = \"auto\"\nseek_step = 5\nvolume_step = 0.05\nyt_dlp_path = \"yt-dlp\"\nyt_dlp_format = \"mp3\"\nyt_dlp_quality = \"128K\"\nyt_dlp_output = \"%(title)s.%(ext)s\"\nyt_search_results = 15\ntheme_mode = \"auto\"\ntheme_preset = \"lavender\"\nuse_glassmorphism = true\ncorner_radius = 10.0\nbackground_kind = \"none\"\nbackground_color = \"#11111b\"\nbackground_gradient_from = \"#1e1b2e\"\nbackground_gradient_to = \"#0f0e17\"\nbackground_gradient_angle = 135.0\nbackground_image = \"\"\n";
+const DEFAULT_CONFIG: &str = "# lavanda - configuration file\n# ~/.config/lavanda/config.toml\n\nmusic_dir = \"~/Music\"\nvolume = 0.8\nshuffle = false\nrepeat = false\nlanguage = \"auto\"\nseek_step = 5\nvolume_step = 0.05\nyt_dlp_path = \"yt-dlp\"\nyt_dlp_format = \"mp3\"\nyt_dlp_quality = \"128K\"\nyt_dlp_output = \"%(title)s.%(ext)s\"\nyt_search_results = 15\ntheme_mode = \"auto\"\ntheme_preset = \"lavender\"\nuse_glassmorphism = true\ncorner_radius = 10.0\nbackground_kind = \"none\"\nbackground_color = \"#11111b\"\nbackground_gradient_from = \"#1e1b2e\"\nbackground_gradient_to = \"#0f0e17\"\nbackground_gradient_angle = 135.0\nbackground_image = \"\"\nlyrics_online = true\nspectrum_style = \"mirrored\"\ncover_size = 240.0\n";

@@ -567,3 +567,17 @@ pub fn base_style_gradient(from: Color, to: Color, angle_deg: f32) -> impl Fn(&i
         ..Default::default()
     }
 }
+
+/// Frame around the album cover: a hairline border just outside the image
+/// and a soft shadow underneath, rounded like the (pre-rounded) cover.
+pub fn cover_frame(radius: f32) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_: &iced::Theme| container::Style {
+        border: Border { color: with_alpha(text(), 0.18), width: 1.5, radius: radius.into() },
+        shadow: iced::Shadow {
+            color: Color { a: 0.35, ..Color::BLACK },
+            offset: iced::Vector::new(0.0, 4.0),
+            blur_radius: 16.0,
+        },
+        ..Default::default()
+    }
+}

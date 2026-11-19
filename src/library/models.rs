@@ -17,6 +17,9 @@ pub struct Track {
     pub play_count: u32,
     pub liked: bool,
     pub date_played: Option<String>,
+    /// YouTube video id, when the file came from YouTube (yt-dlp tags it
+    /// with the video's URL). Used to export playlists.
+    pub yt_id: Option<String>,
 }
 
 impl Track {

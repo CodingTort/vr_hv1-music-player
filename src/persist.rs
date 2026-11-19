@@ -77,6 +77,9 @@ pub struct Db {
     pub hidden_artists_albums: Vec<(String, bool)>,
     #[serde(default = "default_columns")]
     pub table_columns: Vec<TableColumn>,
+    /// Seconds to delay each song's synced lyrics by (negative = sooner).
+    #[serde(default)]
+    pub lyrics_offsets: HashMap<PathBuf, f32>,
 }
 
 impl Default for Db {
@@ -88,6 +91,7 @@ impl Default for Db {
             recently_played: Vec::new(),
             hidden_artists_albums: Vec::new(),
             table_columns: default_columns(),
+            lyrics_offsets: HashMap::new(),
         }
     }
 }
@@ -171,6 +175,20 @@ pub fn toggle_favorite(path: PathBuf) -> bool {
             true
         }
     })
+}
+
+pub fn lyrics_offset(path: &PathBuf) -> f32 {
+    get(|db| db.lyrics_offsets.get(path).copied().unwrap_or(0.0))
+}
+
+pub fn set_lyrics_offset(path: PathBuf, secs: f32) {
+    write(|db| {
+        if secs == 0.0 {
+            db.lyrics_offsets.remove(&path);
+        } else {
+            db.lyrics_offsets.insert(path, secs);
+        }
+    });
 }
 
 pub fn increment_play_count(path: PathBuf) -> u32 {

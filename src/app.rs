@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,6 +18,18 @@ use crate::library::{load_cover, scan_folder};
 use crate::ui::{theme, views};
 
 type Shared<T> = Arc<Mutex<Option<UnboundedReceiver<T>>>>;
+
+pub use crate::audio::mpris::APP_NAME;
+/// The app icon: Tux by Larry Ewing (made with The GIMP).
+const TUX_PNG: &[u8] = include_bytes!("../assets/tux.png");
+
+/// Size limits for the album cover in the player panel.
+const COVER_MIN: f32 = 140.0;
+const COVER_MAX: f32 = 400.0;
+
+/// Width limits for the lyrics side panel.
+const LYRICS_MIN_W: f32 = 240.0;
+const LYRICS_MAX_W: f32 = 720.0;
 
 // ── Enums de navegação ────────────────────────────────────────────────────────
 
@@ -96,6 +109,22 @@ pub struct YtSearchState {
     pub downloading: Option<usize>,
     /// yt-dlp missing/unusable — shown before any search is attempted.
     pub preflight_error: Option<String>,
+    /// Result thumbnails by video id, as they arrive.
+    pub thumbs: HashMap<String, iced::widget::image::Handle>,
+    /// Results downloaded since the dialog opened.
+    pub saved: HashSet<usize>,
+}
+
+// ── Playlist import ───────────────────────────────────────────────────────────
+
+pub struct ImportJob {
+    pub name: String,
+    rows: Vec<crate::playlist_io::Row>,
+    /// YouTube ids still to download.
+    pending: std::collections::VecDeque<String>,
+    pub total: usize,
+    pub done: usize,
+    pub failed: usize,
 }
 
 // ── Tag editor ────────────────────────────────────────────────────────────────
@@ -219,6 +248,7 @@ pub enum Message {
     YtSelect(usize),
     YtDownload(usize),
     YtDownloaded(Result<Option<std::path::PathBuf>, String>),
+    YtThumb(String, Option<iced::widget::image::Handle>),
 
     // Tag editor
     OpenTagEditor(Vec<Track>),
@@ -276,6 +306,35 @@ pub enum Message {
     ToggleSpectrum,
     ToggleLayout,
 
+    // Playlist files (CSV of YouTube ids)
+    ExportPlaylist(String),
+    /// CSV text, and where the user chose to save it.
+    ExportPlaylistTo(String, Option<PathBuf>),
+    ImportPlaylist,
+    ImportPlaylistFrom(Option<PathBuf>),
+    ImportNext,
+    ImportDownloaded(Result<Option<PathBuf>, String>),
+    ImportScanned(Vec<Track>),
+
+    /// A click on the system tray icon or its menu.
+    Tray(crate::tray::TrayCommand),
+
+    // Lyrics
+    ToggleLyrics,
+    LyricsLoaded(PathBuf, crate::lyrics::Lyrics),
+    LyricsDragStart,
+    LyricsDragMove(f32),
+    LyricsDragEnd,
+    /// The line with this timestamp is being sung right now.
+    LyricsSyncLine(Duration),
+    LyricsNudge(f32),
+    LyricsOffsetReset,
+    ToggleLyricsRomaji(bool),
+    /// Furigana for the lyrics with this content key (None: none to show).
+    FuriganaLoaded(u64, Option<Vec<Vec<crate::lyrics::Ruby>>>),
+    /// The playing track's lyrics in the other script (romaji or Japanese).
+    LyricsAltLoaded(PathBuf, crate::lyrics::Lyrics),
+
     // Open local folder
     OpenLocalFolder(PathBuf),
     // Settings
@@ -293,7 +352,12 @@ pub enum Message {
     SettingsBackgroundImageChanged(String),
     SettingsSelectBackgroundImage,
     SettingsBackgroundImageSelected(Option<std::path::PathBuf>),
+    SettingsSpectrumStyleChanged(String),
+    SettingsCoverSizeChanged(f32),
     SettingsApply,
+    /// Blurred copy of a track's cover, made off the UI thread.
+    /// Blurred copy and rounded-corner copy of a track's cover.
+    CoverBlurred(PathBuf, Option<(iced::widget::image::Handle, CoverTone)>, Option<iced::widget::image::Handle>),
 }
 
 // ── Estado global ─────────────────────────────────────────────────────────────
@@ -384,6 +448,31 @@ pub struct AppState {
     pub spectrum: Vec<f32>,
     pub show_spectrum: bool,
 
+    /// A playlist import downloading the songs it is missing.
+    import_job: Option<ImportJob>,
+    /// A short message in the header (export/import results), and until when.
+    status: Option<(String, Instant)>,
+
+    // Lyrics
+    pub show_lyrics: bool,
+    /// Lyrics looked up this session, by track path.
+    lyrics: HashMap<PathBuf, crate::lyrics::Lyrics>,
+    lyrics_loading: HashSet<PathBuf>,
+    /// Show Japanese lyrics in romaji (the switch in the lyrics panel).
+    pub lyrics_romaji: bool,
+    /// Other-script versions: romaji made from Japanese lyrics, or Japanese
+    /// lyrics found for songs whose lyrics came back in romaji.
+    lyrics_alt: HashMap<PathBuf, crate::lyrics::Lyrics>,
+    lyrics_alt_loading: HashSet<PathBuf>,
+    /// Furigana per set of Japanese lyrics, keyed by their content.
+    furigana: HashMap<u64, Option<Vec<Vec<crate::lyrics::Ruby>>>>,
+    furigana_loading: HashSet<u64>,
+    /// Seconds the playing track's synced lyrics are delayed by.
+    pub lyrics_offset: f32,
+    pub lyrics_width: f32,
+    dragging_lyrics: bool,
+    window_width: f32,
+
     // Tema
     pub iced_theme: Theme,
     loaded_theme_name: String,
@@ -397,7 +486,21 @@ pub struct AppState {
     pub background_gradient_to: String,
     pub background_gradient_angle: f32,
     pub background_image: Option<String>,
+    pub spectrum_style: String,
+    pub cover_size: f32,
     pub show_settings: bool,
+    /// The playing track's cover, decoded once per track. (`Handle::from_bytes`
+    /// gets a new id on every call, so building it in `view` re-decoded the
+    /// image on every frame.)
+    pub cover: Option<iced::widget::image::Handle>,
+    /// Small blurred copy of the cover for the "album" background.
+    blurred_cover: Option<iced::widget::image::Handle>,
+    /// Brightness and main colour of the cover, for adjusting the colours.
+    pub cover_tone: Option<CoverTone>,
+    /// The cover cropped square with rounded corners (iced can't round an
+    /// image itself), matching the corner radius setting.
+    pub cover_rounded: Option<iced::widget::image::Handle>,
+    pub logo: iced::widget::image::Handle,
 
     // i18n
     pub strings: &'static crate::locale::Strings,
@@ -408,6 +511,9 @@ pub struct AppState {
     spectrum_rx: Shared<Vec<f32>>,
     mpris_cmds: Shared<MprisCommand>,
     mpris_update_tx: tokio::sync::mpsc::UnboundedSender<MprisUpdate>,
+    tray_cmds: Shared<crate::tray::TrayCommand>,
+    /// "Title — Artist" for the tray icon's tooltip.
+    tray_song_tx: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
 impl AppState {
@@ -426,6 +532,11 @@ impl AppState {
         let (mpris_update_tx, mpris_update_rx) = tokio::sync::mpsc::unbounded_channel();
         mpris::launch(mpris_cmd_tx, mpris_update_rx);
         let mpris_cmds = Arc::new(Mutex::new(Some(mpris_cmd_rx)));
+
+        let (tray_cmd_tx, tray_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tray_song_tx, tray_song_rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::tray::launch(tray_cmd_tx, tray_song_rx);
+        let tray_cmds = Arc::new(Mutex::new(Some(tray_cmd_rx)));
 
         let loaded_theme_name = crate::ui::theme::read_current_theme_name();
         let iced_theme = build_iced_theme();
@@ -495,6 +606,20 @@ impl AppState {
             layout: Layout::Standard,
             spectrum: vec![0.0; crate::audio::spectrum::NUM_BARS],
             show_spectrum: true,
+            import_job: None,
+            status: None,
+            show_lyrics: saved.show_lyrics.unwrap_or(true),
+            lyrics: HashMap::new(),
+            lyrics_loading: HashSet::new(),
+            lyrics_romaji: saved.lyrics_romaji.unwrap_or(false),
+            lyrics_alt: HashMap::new(),
+            lyrics_alt_loading: HashSet::new(),
+            furigana: HashMap::new(),
+            furigana_loading: HashSet::new(),
+            lyrics_offset: 0.0,
+            lyrics_width: saved.lyrics_width.unwrap_or(340.0).clamp(LYRICS_MIN_W, LYRICS_MAX_W),
+            dragging_lyrics: false,
+            window_width: 960.0,
             iced_theme,
             loaded_theme_name,
             theme_mode: cfg.theme_mode.clone(),
@@ -510,13 +635,22 @@ impl AppState {
                 let b = cfg.background_image.trim();
                 if b.is_empty() { None } else { Some(b.to_string()) }
             },
+            spectrum_style: cfg.spectrum_style.clone(),
+            cover_size: cfg.cover_size.clamp(COVER_MIN, COVER_MAX),
             show_settings: false,
+            cover: None,
+            blurred_cover: None,
+            cover_tone: None,
+            cover_rounded: None,
+            logo: iced::widget::image::Handle::from_bytes(TUX_PNG),
             strings: crate::locale::get(),
             audio,
             audio_events,
             spectrum_rx,
             mpris_cmds,
             mpris_update_tx,
+            tray_cmds,
+            tray_song_tx,
         };
 
         (state, scan_task)
@@ -525,7 +659,211 @@ impl AppState {
     fn persist_state(&self) {
         crate::state::save(&crate::state::SavedState {
             volume: Some(self.volume),
+            show_lyrics: Some(self.show_lyrics),
+            lyrics_width: Some(self.lyrics_width),
+            lyrics_romaji: Some(self.lyrics_romaji),
         });
+    }
+
+    /// Whether the romaji switch applies to this track: its lyrics are in
+    /// Japanese or in romaji, or its tags are in Japanese.
+    pub fn is_japanese_song(&self, track: &Track) -> bool {
+        use crate::lyrics::{has_japanese, lines_have_japanese, lines_look_like_romaji, Lyrics};
+        let lyrics_jp = match self.lyrics.get(&track.path) {
+            Some(Lyrics::Synced(l) | Lyrics::Plain(l)) => lines_have_japanese(l) || lines_look_like_romaji(l),
+            _ => false,
+        };
+        lyrics_jp || has_japanese(&format!("{} {}", track.title, track.artist))
+    }
+
+    /// `Some(true)` when the panel should show romaji made from these
+    /// lyrics, `Some(false)` when it should show Japanese found for romaji
+    /// lyrics, `None` when the looked-up lyrics are already right.
+    fn wanted_alt(&self, track: &Track) -> Option<bool> {
+        use crate::lyrics::{lines_have_japanese, Lyrics};
+        let Some(Lyrics::Synced(lines) | Lyrics::Plain(lines)) = self.lyrics.get(&track.path) else {
+            return None;
+        };
+        let japanese = lines_have_japanese(lines);
+        if self.lyrics_romaji && japanese {
+            Some(true)
+        } else if !self.lyrics_romaji && !japanese && self.is_japanese_song(track) {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
+    /// The lyrics the panel shows for `track`, and a note when the version
+    /// the romaji switch asks for isn't available (yet).
+    pub fn shown_lyrics(&self, track: &Track) -> (Option<&crate::lyrics::Lyrics>, Option<String>) {
+        use crate::lyrics::Lyrics;
+        let primary = self.lyrics.get(&track.path);
+        let Some(romaji) = self.wanted_alt(track) else { return (primary, None) };
+        match self.lyrics_alt.get(&track.path) {
+            Some(alt @ (Lyrics::Synced(_) | Lyrics::Plain(_))) => (Some(alt), None),
+            Some(Lyrics::Error(e)) => (primary, Some(e.clone())),
+            Some(_) => (primary, Some("No Japanese version on LRCLIB".into())),
+            None if romaji => (primary, Some("Converting to romaji…".into())),
+            None => (primary, Some("Looking for the Japanese lyrics…".into())),
+        }
+    }
+
+    /// A playlist file's songs, in file order: matched by YouTube id, or by
+    /// title and artist for songs that didn't come from YouTube.
+    fn import_paths(&self, rows: &[crate::playlist_io::Row]) -> Vec<PathBuf> {
+        rows.iter()
+            .filter_map(|r| {
+                self.all_tracks.iter().find(|t| {
+                    if r.id.is_empty() {
+                        t.title.eq_ignore_ascii_case(&r.title) && t.artist.eq_ignore_ascii_case(&r.artist)
+                    } else {
+                        t.yt_id.as_deref() == Some(r.id.as_str())
+                    }
+                })
+            })
+            .map(|t| t.path.clone())
+            .collect()
+    }
+
+    fn set_status(&mut self, message: String) {
+        self.status = Some((message, Instant::now() + Duration::from_secs(6)));
+    }
+
+    /// Header note: a running import's progress, or a recent message.
+    pub fn status_text(&self) -> Option<String> {
+        if let Some(job) = &self.import_job {
+            return Some(format!("Importing “{}”: {}/{} downloaded…", job.name, job.done + job.failed, job.total));
+        }
+        self.status.as_ref().filter(|(_, until)| Instant::now() < *until).map(|(s, _)| s.clone())
+    }
+
+        /// Colour for the lyrics: tinted with the cover when the cover is bright
+    /// (white lyrics would wash out), the theme's text colour otherwise.
+    pub fn lyrics_color(&self) -> iced::Color {
+        match self.cover_tone {
+            Some(tone) if self.background_kind == "album" && tone.is_bright() => tone.lyrics_tint(),
+            _ => theme::text(),
+        }
+    }
+
+    /// Makes the blurred and the rounded copies of a cover off the UI thread.
+    fn cover_task(&self, path: &std::path::Path, bytes: Option<Vec<u8>>) -> Task<Message> {
+        let path = path.to_path_buf();
+        // Corner radius as a fraction of the cover's width, so it looks the
+        // same at any display size.
+        let radius = self.corner_radius / self.cover_size;
+        Task::perform(
+            async move {
+                let made = tokio::task::spawn_blocking(move || {
+                    let bytes = bytes?;
+                    Some((blurred_cover(&bytes), rounded_cover(&bytes, radius)))
+                })
+                .await
+                .ok()
+                .flatten();
+                let (blurred, rounded) = made.unwrap_or((None, None));
+                (path, blurred, rounded)
+            },
+            |(path, blurred, rounded)| Message::CoverBlurred(path, blurred, rounded),
+        )
+    }
+
+    /// Redoes the rounded cover after the corner radius or cover size changed.
+    fn refresh_cover(&self) -> Task<Message> {
+        match &self.current_track {
+            Some(t) => self.cover_task(&t.path, t.cover_data.clone()),
+            None => Task::none(),
+        }
+    }
+
+    /// Furigana for these lines, once worked out.
+    pub fn furigana_for(&self, lines: &[crate::lyrics::LyricLine]) -> Option<&Vec<Vec<crate::lyrics::Ruby>>> {
+        self.furigana.get(&furigana_key(lines))?.as_ref()
+    }
+
+    /// Starts working out furigana for the Japanese lyrics on screen.
+    fn ensure_furigana(&mut self) -> Task<Message> {
+        use crate::lyrics::Lyrics;
+        let Some(track) = self.current_track.as_ref().filter(|_| self.show_lyrics) else {
+            return Task::none();
+        };
+        let lines = match self.shown_lyrics(track).0 {
+            Some(Lyrics::Synced(l) | Lyrics::Plain(l)) if crate::lyrics::wants_furigana(l) => l.clone(),
+            _ => return Task::none(),
+        };
+        let key = furigana_key(&lines);
+        if self.furigana.contains_key(&key) || !self.furigana_loading.insert(key) {
+            return Task::none();
+        }
+        let texts: Vec<String> = lines.into_iter().map(|l| l.text).collect();
+        Task::perform(
+            async move { (key, crate::lyrics::furigana(texts).await.ok()) },
+            |(key, ruby)| Message::FuriganaLoaded(key, ruby),
+        )
+    }
+
+    /// Starts converting to romaji, or looking up the Japanese version, when
+    /// the romaji switch needs a version we don't have yet.
+    fn ensure_lyrics_alt(&mut self) -> Task<Message> {
+        use crate::lyrics::Lyrics;
+        let Some(track) = self.current_track.as_ref().filter(|_| self.show_lyrics) else {
+            return Task::none();
+        };
+        let Some(romaji) = self.wanted_alt(track) else { return Task::none() };
+        let done = matches!(self.lyrics_alt.get(&track.path), Some(l) if !matches!(l, Lyrics::Error(_)));
+        if done || !self.lyrics_alt_loading.insert(track.path.clone()) {
+            return Task::none();
+        }
+        let path = track.path.clone();
+        if romaji {
+            let (lines, synced) = match self.lyrics.get(&path) {
+                Some(Lyrics::Synced(l)) => (l.clone(), true),
+                Some(Lyrics::Plain(l)) => (l.clone(), false),
+                _ => return Task::none(),
+            };
+            let query = crate::lyrics::Query::from(track);
+            Task::perform(
+                async move { (path, crate::lyrics::romaji(query, lines, synced).await) },
+                |(path, alt)| Message::LyricsAltLoaded(path, alt),
+            )
+        } else {
+            let query = crate::lyrics::Query::from(track);
+            Task::perform(
+                async move { (path, crate::lyrics::find_japanese(query).await) },
+                |(path, alt)| Message::LyricsAltLoaded(path, alt),
+            )
+        }
+    }
+
+    /// Sets the playing track's lyrics delay; only meaningful for synced lyrics.
+    fn set_lyrics_offset(&mut self, secs: f32) -> Task<Message> {
+        let Some(track) = &self.current_track else { return Task::none() };
+        if !matches!(self.lyrics.get(&track.path), Some(crate::lyrics::Lyrics::Synced(_))) {
+            return Task::none();
+        }
+        // Tenths of a second: finer than anyone can hear, and tidy to show.
+        self.lyrics_offset = (secs * 10.0).round() / 10.0;
+        crate::persist::set_lyrics_offset(track.path.clone(), self.lyrics_offset);
+        Task::none()
+    }
+
+    /// Starts a lyrics lookup for the playing track if the panel is shown and
+    /// there is no result yet. Failed lookups are retried.
+    fn ensure_lyrics(&mut self) -> Task<Message> {
+        let Some(track) = self.current_track.as_ref().filter(|_| self.show_lyrics) else {
+            return Task::none();
+        };
+        let done = matches!(self.lyrics.get(&track.path), Some(l) if !matches!(l, crate::lyrics::Lyrics::Error(_)));
+        if done || !self.lyrics_loading.insert(track.path.clone()) {
+            return Task::none();
+        }
+        let query = crate::lyrics::Query::from(track);
+        let path = track.path.clone();
+        Task::perform(
+            async move { (path, crate::lyrics::load(query).await) },
+            |(path, lyrics)| Message::LyricsLoaded(path, lyrics),
+        )
     }
 
     /// True when panels should use translucent "glass" surfaces. A custom
@@ -546,6 +884,8 @@ impl AppState {
         cfg.background_gradient_to = self.background_gradient_to.clone();
         cfg.background_gradient_angle = self.background_gradient_angle;
         cfg.background_image = self.background_image.clone().unwrap_or_default();
+        cfg.spectrum_style = self.spectrum_style.clone();
+        cfg.cover_size = self.cover_size;
         let _ = crate::persist::save_config(&cfg);
     }
 
@@ -790,10 +1130,30 @@ impl AppState {
                                 d.error = Some("No results found.".into());
                             } else {
                                 d.results = results;
+                                d.thumbs.clear();
+                                d.saved.clear();
                                 d.status = Some(format!(
                                     "{} results — Enter to download, ↓/↑ to pick",
                                     d.results.len()
                                 ));
+                                // Thumbnails load in the background, all at once.
+                                let radius = self.corner_radius;
+                                return Task::batch(d.results.iter().map(|r| {
+                                    let id = r.id.clone();
+                                    Task::perform(
+                                        async move {
+                                            let bytes = crate::youtube::thumbnail(id.clone()).await;
+                                            let handle = tokio::task::spawn_blocking(move || {
+                                                bytes.as_deref().and_then(|b| rounded_thumbnail(b, radius))
+                                            })
+                                            .await
+                                            .ok()
+                                            .flatten();
+                                            (id, handle)
+                                        },
+                                        |(id, handle)| Message::YtThumb(id, handle),
+                                    )
+                                }));
                             }
                         }
                     }
@@ -849,7 +1209,9 @@ impl AppState {
                             None => "Download complete.".to_string(),
                         };
                         if let Some(ref mut d) = self.yt_dialog {
-                            d.downloading = None;
+                            if let Some(i) = d.downloading.take() {
+                                d.saved.insert(i);
+                            }
                             d.status = Some(msg);
                         }
                         // Pick the new file up in the library right away.
@@ -861,6 +1223,13 @@ impl AppState {
                             d.error = Some(e);
                         }
                     }
+                }
+                Task::none()
+            }
+
+            Message::YtThumb(id, handle) => {
+                if let (Some(d), Some(handle)) = (self.yt_dialog.as_mut(), handle) {
+                    d.thumbs.insert(id, handle);
                 }
                 Task::none()
             }
@@ -961,7 +1330,8 @@ impl AppState {
             }
             Message::PlaylistDragEnd => { self.dragging_playlist_split = false; Task::none() }
 
-            Message::WindowResized(_w, h) => {
+            Message::WindowResized(w, h) => {
+                self.window_width = w;
                 self.window_height = h;
                 if !self.playlist_height_initialized {
                     self.playlist_height = ((h - 212.0) * 0.33).max(50.0);
@@ -1425,7 +1795,7 @@ impl AppState {
                     let q = format!("{} {} album art", s.artist, s.album)
                         .chars().map(|c| if c == ' ' { '+' } else { c }).collect::<String>();
                     let url = format!("https://www.google.com/search?q={}&tbm=isch", q);
-                    std::process::Command::new("xdg-open").arg(url).spawn().ok();
+                    spawn_detached(std::process::Command::new("xdg-open").arg(url));
                 }
                 Task::none()
             }
@@ -1605,6 +1975,216 @@ impl AppState {
                 Task::none()
             }
 
+            Message::Tray(command) => {
+                use crate::tray::TrayCommand;
+                match command {
+                    TrayCommand::PlayPause => self.update(Message::PlayPause),
+                    TrayCommand::Next => self.advance_track(1),
+                    TrayCommand::Previous => self.advance_track(-1),
+                    // Wayland apps can't raise their own window; ask Hyprland
+                    // (the app id is "lavanda"). Elsewhere this does nothing.
+                    TrayCommand::ShowWindow => {
+                        spawn_detached(
+                            std::process::Command::new("hyprctl").args(["dispatch", "focuswindow", "class:^(lavanda)$"]),
+                        );
+                        Task::none()
+                    }
+                    TrayCommand::Quit => iced::exit(),
+                }
+            }
+
+            // ── Playlist files ────────────────────────────────────────────────
+
+            Message::ExportPlaylist(name) => {
+                let paths = crate::persist::get(|db| db.playlists.get(&name).cloned().unwrap_or_default());
+                let tracks = paths.iter().filter_map(|p| self.all_tracks.iter().find(|t| &t.path == p));
+                let csv = crate::playlist_io::to_csv(tracks);
+                let file_name = format!("{name}.csv");
+                Task::perform(
+                    async move {
+                        let picked = rfd::AsyncFileDialog::new()
+                            .set_file_name(&file_name)
+                            .add_filter("Playlist (CSV)", &["csv"])
+                            .save_file()
+                            .await;
+                        (csv, picked.map(|h| h.path().to_path_buf()))
+                    },
+                    |(csv, path)| Message::ExportPlaylistTo(csv, path),
+                )
+            }
+
+            Message::ExportPlaylistTo(csv, path) => {
+                if let Some(path) = path {
+                    let shown = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let note = match std::fs::write(&path, csv) {
+                        Ok(()) => format!("Saved {shown}"),
+                        Err(e) => format!("Couldn't save {shown}: {e}"),
+                    };
+                    self.set_status(note);
+                }
+                Task::none()
+            }
+
+            Message::ImportPlaylist => {
+                if self.import_job.is_some() {
+                    self.set_status("An import is already running".into());
+                    return Task::none();
+                }
+                Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .add_filter("Playlist (CSV)", &["csv", "txt"])
+                            .pick_file()
+                            .await
+                            .map(|h| h.path().to_path_buf())
+                    },
+                    Message::ImportPlaylistFrom,
+                )
+            }
+
+            Message::ImportPlaylistFrom(None) => Task::none(),
+            Message::ImportPlaylistFrom(Some(path)) => {
+                let rows = match std::fs::read_to_string(&path) {
+                    Ok(text) => crate::playlist_io::parse_csv(&text),
+                    Err(e) => {
+                        self.set_status(format!("Couldn't read that file: {e}"));
+                        return Task::none();
+                    }
+                };
+                if rows.is_empty() {
+                    self.set_status("No songs in that file".into());
+                    return Task::none();
+                }
+                // Named after the file, never replacing an existing playlist.
+                let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Imported".into());
+                let existing = crate::persist::get(|db| db.playlists.keys().cloned().collect::<HashSet<_>>());
+                let name = (1..)
+                    .map(|n| if n == 1 { stem.clone() } else { format!("{stem} ({n})") })
+                    .find(|n| !existing.contains(n))
+                    .unwrap_or(stem);
+
+                // Songs already here are added now; the rest are downloaded.
+                let have: HashSet<&str> = self.all_tracks.iter().filter_map(|t| t.yt_id.as_deref()).collect();
+                let mut queued = HashSet::new();
+                let pending: std::collections::VecDeque<String> = rows
+                    .iter()
+                    .filter(|r| !r.id.is_empty() && !have.contains(r.id.as_str()) && queued.insert(r.id.clone()))
+                    .map(|r| r.id.clone())
+                    .collect();
+                let paths = self.import_paths(&rows);
+                let found = paths.len();
+                crate::persist::write(|db| {
+                    db.playlists.insert(name.clone(), paths);
+                });
+                if pending.is_empty() {
+                    self.set_status(format!("Imported “{name}” ({found} songs)"));
+                    return Task::none();
+                }
+                let total = pending.len();
+                self.import_job = Some(ImportJob { name, rows, pending, total, done: 0, failed: 0 });
+                Task::done(Message::ImportNext)
+            }
+
+            Message::ImportNext => {
+                let Some(job) = self.import_job.as_mut() else { return Task::none() };
+                match job.pending.pop_front() {
+                    Some(id) => Task::perform(
+                        async move { crate::youtube::download(&format!("https://www.youtube.com/watch?v={id}")).await },
+                        Message::ImportDownloaded,
+                    ),
+                    // All fetched: rescan, then link the new files.
+                    None => {
+                        let dir = crate::config::get().music_path();
+                        Task::perform(
+                            async move { tokio::task::spawn_blocking(move || scan_folder(&dir)).await.unwrap_or_default() },
+                            Message::ImportScanned,
+                        )
+                    }
+                }
+            }
+
+            Message::ImportDownloaded(result) => {
+                if let Some(job) = self.import_job.as_mut() {
+                    match result {
+                        Ok(_) => job.done += 1,
+                        Err(_) => job.failed += 1,
+                    }
+                }
+                Task::done(Message::ImportNext)
+            }
+
+            Message::ImportScanned(tracks) => {
+                let rescan = self.update(Message::LibraryScanned(tracks));
+                if let Some(job) = self.import_job.take() {
+                    let paths = self.import_paths(&job.rows);
+                    let count = paths.len();
+                    crate::persist::write(|db| {
+                        db.playlists.insert(job.name.clone(), paths);
+                    });
+                    if self.selected_playlist.as_deref() == Some(job.name.as_str()) {
+                        self.update_filtered_tracks();
+                    }
+                    self.set_status(match job.failed {
+                        0 => format!("Imported “{}” ({count} songs)", job.name),
+                        n => format!("Imported “{}” ({count} songs; {n} couldn't be downloaded)", job.name),
+                    });
+                }
+                rescan
+            }
+
+            // ── Lyrics ────────────────────────────────────────────────────────
+
+            Message::ToggleLyrics => {
+                self.show_lyrics = !self.show_lyrics;
+                self.persist_state();
+                Task::batch([self.ensure_lyrics(), self.ensure_lyrics_alt(), self.ensure_furigana()])
+            }
+
+            Message::LyricsLoaded(path, lyrics) => {
+                self.lyrics_loading.remove(&path);
+                self.lyrics.insert(path, lyrics);
+                Task::batch([self.ensure_lyrics_alt(), self.ensure_furigana()])
+            }
+
+            Message::ToggleLyricsRomaji(on) => {
+                self.lyrics_romaji = on;
+                self.persist_state();
+                Task::batch([self.ensure_lyrics_alt(), self.ensure_furigana()])
+            }
+
+            Message::LyricsAltLoaded(path, lyrics) => {
+                self.lyrics_alt_loading.remove(&path);
+                self.lyrics_alt.insert(path, lyrics);
+                self.ensure_furigana()
+            }
+
+            Message::FuriganaLoaded(key, ruby) => {
+                self.furigana_loading.remove(&key);
+                self.furigana.insert(key, ruby);
+                Task::none()
+            }
+
+            Message::LyricsDragStart => { self.dragging_lyrics = true; Task::none() }
+            Message::LyricsDragMove(x) => {
+                // The panel sits against the right edge of the window.
+                self.lyrics_width = (self.window_width - x).clamp(LYRICS_MIN_W, LYRICS_MAX_W);
+                Task::none()
+            }
+            Message::LyricsDragEnd => {
+                self.dragging_lyrics = false;
+                self.persist_state();
+                Task::none()
+            }
+
+            Message::LyricsSyncLine(line_time) => {
+                // Delay everything so that this line starts now. Fixes lyrics
+                // timed for a cut without the music video's intro, and the like.
+                let secs = self.position.as_secs_f64() - line_time.as_secs_f64();
+                self.set_lyrics_offset(secs as f32)
+            }
+            Message::LyricsNudge(delta) => self.set_lyrics_offset(self.lyrics_offset + delta),
+            Message::LyricsOffsetReset => self.set_lyrics_offset(0.0),
+
             Message::SpectrumData(bins) => {
                 for (a, b) in self.spectrum.iter_mut().zip(bins.iter()) {
                     *a = *a * 0.55 + b * 0.45;
@@ -1762,6 +2342,9 @@ impl AppState {
                             "a" | "A" => return Task::done(Message::KeyboardAdd),
                             "t" | "T" => return Task::done(Message::ToggleLayout),
                             "v" | "V" => return Task::done(Message::ToggleSpectrum),
+                            "k" | "K" => return Task::done(Message::ToggleLyrics),
+                            "[" => return Task::done(Message::LyricsNudge(-0.5)),
+                            "]" => return Task::done(Message::LyricsNudge(0.5)),
                             "y" | "Y" if !has_yt_dialog => return Task::done(Message::OpenYtSearch),
                             "?" => return Task::done(Message::OpenShortcuts),
                             _ => {}
@@ -1779,7 +2362,7 @@ impl AppState {
                 if let Some(parent) = path.parent() {
                     let folder = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
                     for fm in &["nautilus", "thunar", "dolphin", "nemo", "pcmanfm-qt", "pcmanfm"] {
-                        if std::process::Command::new(fm).arg(&folder).spawn().is_ok() { break; }
+                        if spawn_detached(std::process::Command::new(fm).arg(&folder)) { break; }
                     }
                 }
                 Task::none()
@@ -1816,7 +2399,7 @@ impl AppState {
             Message::SettingsCornerRadiusChanged(v) => {
                 self.corner_radius = v.clamp(4.0, 20.0);
                 crate::ui::theme::set_corner_radius(self.corner_radius);
-                Task::none()
+                self.refresh_cover()
             }
             Message::SettingsBackgroundKindChanged(k) => {
                 self.background_kind = k.to_lowercase();
@@ -1859,6 +2442,24 @@ impl AppState {
                 }
                 Task::none()
             }
+            Message::SettingsSpectrumStyleChanged(style) => {
+                self.spectrum_style = style;
+                Task::none()
+            }
+            Message::SettingsCoverSizeChanged(size) => {
+                self.cover_size = size.clamp(COVER_MIN, COVER_MAX).round();
+                self.refresh_cover()
+            }
+            Message::CoverBlurred(path, handle, rounded) => {
+                // Ignore a result for a track that is no longer playing.
+                if self.current_track.as_ref().is_some_and(|t| t.path == path) {
+                    let (blurred, tone) = handle.map_or((None, None), |(h, t)| (Some(h), Some(t)));
+                    self.blurred_cover = blurred;
+                    self.cover_tone = tone;
+                    self.cover_rounded = rounded;
+                }
+                Task::none()
+            }
             Message::SettingsApply => {
                 crate::ui::theme::reload_with_mode(&self.theme_mode, &self.theme_preset);
                 self.iced_theme = build_iced_theme();
@@ -1873,7 +2474,13 @@ impl AppState {
             Message::Audio(event) => match event {
                 AudioEvent::Progress { position, duration } => {
                     self.position = position;
-                    self.duration = duration;
+                    // Zero when the file doesn't state its length: use the
+                    // length read from the tags instead.
+                    self.duration = if duration.is_zero() {
+                        self.current_track.as_ref().map_or(Duration::ZERO, |t| t.duration)
+                    } else {
+                        duration
+                    };
                     Task::none()
                 }
                 AudioEvent::Paused => { self.playback_state = PlaybackState::Paused; Task::none() }
@@ -1978,12 +2585,20 @@ impl AppState {
             Layout::Focus => column![self.header_view(), views::focus::view(self)]
                 .spacing(0).width(Length::Fill).height(Length::Fill).into(),
             Layout::Standard => {
+                let library: Element<Message> = if self.show_lyrics {
+                    row![views::library::view(self), views::lyrics::side_panel(self)].into()
+                } else {
+                    views::library::view(self)
+                };
+                // Header, player, sidebar, track list and lyrics are separate
+                // rounded cards with even gaps between them.
                 let main_col = column![
                     self.header_view(),
                     views::player::view(self),
-                    views::library::view(self),
+                    library,
                 ]
-                .spacing(0)
+                .spacing(8)
+                .padding(8)
                 .width(Length::Fill)
                 .height(Length::Fill);
 
@@ -2039,22 +2654,19 @@ impl AppState {
                 }
             }
             "album" => {
-                // try to get cover from current track; if missing, fall back to main
-                if let Some(track) = &self.current_track {
-                    if let Some(ref cover) = track.cover_data {
-                        let handle = iced::widget::image::Handle::from_bytes(cover.clone());
-                        let bg: Element<Message> = iced::widget::image(handle)
+                // A blurred wash of the playing track's cover, like Apple
+                // Music's player; no cover (or nothing playing) = plain theme.
+                match &self.blurred_cover {
+                    Some(handle) => {
+                        let bg: Element<Message> = iced::widget::image(handle.clone())
                             .width(Length::Fill)
                             .height(Length::Fill)
                             .content_fit(iced::ContentFit::Cover)
-                            .opacity(0.6_f32)
+                            .opacity(self.cover_tone.map_or(0.75, |t| t.backdrop_opacity()))
                             .into();
                         stack![bg, main]
-                    } else {
-                        stack![main]
                     }
-                } else {
-                    stack![main]
+                    None => stack![main],
                 }
             }
             _ => stack![main],
@@ -2098,6 +2710,8 @@ impl AppState {
                 self.background_gradient_angle,
                 self.background_image.as_deref().unwrap_or(""),
                 self.corner_radius,
+                &self.spectrum_style,
+                self.cover_size,
             ));
         }
 
@@ -2116,19 +2730,32 @@ impl AppState {
         .style(iced::widget::button::text)
         .padding([0, 4]);
 
+        let lyrics_btn = button(
+            text(crate::ui::icons::ICON_LYRICS)
+                .font(crate::ui::icons::NERD_FONT_MONO)
+                .color(if self.show_lyrics { theme::accent() } else { theme::text() })
+                .size(24),
+        )
+        .on_press(Message::ToggleLyrics)
+        .style(iced::widget::button::text)
+        .padding([0, 4]);
+
         let header_style = if self.glass_surfaces() { theme::header_glass } else { theme::header };
         container(
             row![
-                text(crate::ui::icons::ICON_MUSIC)
-                    .font(crate::ui::icons::NERD_FONT_MONO)
-                    .color(theme::accent())
-                    .size(32),
-                Space::with_width(6),
-                text("lavanda")
+                iced::widget::image(self.logo.clone()).width(28).height(28),
+                Space::with_width(8),
+                text(APP_NAME)
                     .color(theme::accent())
                     .size(16)
                     .font(crate::ui::icons::UI_FONT_BOLD),
                 Space::with_width(Length::Fill),
+                text(self.status_text().unwrap_or_default())
+                    .size(12)
+                    .color(theme::subtext())
+                    .shaping(iced::widget::text::Shaping::Advanced),
+                Space::with_width(12),
+                lyrics_btn,
                 settings_btn,
             ]
             .align_y(Alignment::Center),
@@ -2168,6 +2795,9 @@ impl AppState {
             row_item("A", "Add song to playlist"),
             row_item("T", "Toggle focus mode"),
             row_item("V", "Toggle spectrum visualizer"),
+            row_item("K", "Toggle lyrics"),
+            row_item("Right-click", "Lyrics: sync that line to now"),
+            row_item("[ / ]", "Lyrics 0.5 s earlier / later"),
             row_item("←/→", "Seek backward / forward"),
             row_item("↑/↓", "Navigate track list"),
             row_item("Y", "Search YouTube & download"),
@@ -2182,7 +2812,7 @@ impl AppState {
             .width(440)
             .style(|_| iced::widget::container::Style {
                 background: Some(iced::Background::Color(theme::base())),
-                border: iced::Border { color: theme::accent(), width: 1.0, radius: 8.0.into() },
+                border: iced::Border { color: theme::accent(), width: 1.0, radius: crate::ui::theme::corner_radius().into() },
                 shadow: iced::Shadow {
                     color: theme::mantle(),
                     offset: iced::Vector { x: 0.0, y: 4.0 },
@@ -2211,7 +2841,7 @@ impl AppState {
             iced::widget::button::Style {
                 background: if hovered { Some(iced::Background::Color(theme::with_alpha(theme::accent(), 0.2))) } else { None },
                 text_color: if hovered { theme::accent() } else { theme::text() },
-                border: iced::Border { radius: 4.0.into(), ..Default::default() },
+                border: iced::Border { radius: (crate::ui::theme::corner_radius() / 2.0).into(), ..Default::default() },
                 ..Default::default()
             }
         };
@@ -2221,7 +2851,7 @@ impl AppState {
             iced::widget::button::Style {
                 background: if hovered { Some(iced::Background::Color(theme::with_alpha(theme::accent(), 0.2))) } else { None },
                 text_color: theme::accent(),
-                border: iced::Border { radius: 4.0.into(), ..Default::default() },
+                border: iced::Border { radius: (crate::ui::theme::corner_radius() / 2.0).into(), ..Default::default() },
                 ..Default::default()
             }
         };
@@ -2239,7 +2869,7 @@ impl AppState {
                     let artist_tracks: Vec<_> = self.all_tracks.iter()
                         .filter(|t| t.artist == *name).cloned().collect();
                     playlist_section = playlist_section.push(
-                        button(text(format!("  + {pl}")).size(12))
+                        button(text(format!("  + {pl}")).size(12).shaping(iced::widget::text::Shaping::Advanced))
                             .on_press(Message::AddTracksToPlaylist(pl.clone(), artist_tracks))
                             .style(item_style).padding([4, 8]).width(Length::Fill)
                     );
@@ -2257,7 +2887,7 @@ impl AppState {
                     let album_tracks: Vec<_> = self.all_tracks.iter()
                         .filter(|t| t.album == *name).cloned().collect();
                     playlist_section = playlist_section.push(
-                        button(text(format!("  + {pl}")).size(12))
+                        button(text(format!("  + {pl}")).size(12).shaping(iced::widget::text::Shaping::Advanced))
                             .on_press(Message::AddTracksToPlaylist(pl.clone(), album_tracks))
                             .style(item_style).padding([4, 8]).width(Length::Fill)
                     );
@@ -2282,7 +2912,7 @@ impl AppState {
                 ].spacing(4).into();
                 for pl in &custom_playlists {
                     playlist_section = playlist_section.push(
-                        button(text(format!("  + {pl}")).size(12))
+                        button(text(format!("  + {pl}")).size(12).shaping(iced::widget::text::Shaping::Advanced))
                             .on_press(Message::AddTracksToPlaylist(pl.clone(), vec![track.clone()]))
                             .style(item_style).padding([4, 8]).width(Length::Fill)
                     );
@@ -2298,7 +2928,7 @@ impl AppState {
                     .style(item_style).padding([4, 8]).width(Length::Fill).into();
                 for pl in &custom_playlists {
                     playlist_section = playlist_section.push(
-                        button(text(format!("  + {pl}")).size(12))
+                        button(text(format!("  + {pl}")).size(12).shaping(iced::widget::text::Shaping::Advanced))
                             .on_press(Message::AddTracksToPlaylist(pl.clone(), tracks.clone()))
                             .style(item_style).padding([4, 8]).width(Length::Fill)
                     );
@@ -2345,7 +2975,7 @@ impl AppState {
 
         let mut menu_col = column![
             row![
-                text(title).size(13).font(crate::ui::icons::UI_FONT_BOLD).color(theme::accent()),
+                text(title).size(13).font(crate::ui::icons::UI_FONT_BOLD).color(theme::accent()).shaping(iced::widget::text::Shaping::Advanced),
                 Space::with_width(Length::Fill),
                 button(text(crate::ui::icons::ICON_CLOSE).font(crate::ui::icons::NERD_FONT_MONO).color(theme::red()).size(26))
                     .on_press(Message::ToggleContextMenu(None)).style(iced::widget::button::text),
@@ -2363,7 +2993,7 @@ impl AppState {
         .width(260)
         .style(|_| iced::widget::container::Style {
             background: Some(iced::Background::Color(theme::mantle())),
-            border: iced::Border { color: theme::accent(), width: 1.0, radius: 8.0.into() },
+            border: iced::Border { color: theme::accent(), width: 1.0, radius: crate::ui::theme::corner_radius().into() },
             shadow: iced::Shadow {
                 color: theme::base(),
                 offset: iced::Vector { x: 0.0, y: 4.0 },
@@ -2388,6 +3018,7 @@ impl AppState {
         let base = Subscription::batch([
             Subscription::run_with_id("audio-events", channel_stream(self.audio_events.clone(), Message::Audio)),
             Subscription::run_with_id("mpris-cmds", channel_stream(self.mpris_cmds.clone(), Message::Mpris)),
+            Subscription::run_with_id("tray-cmds", channel_stream(self.tray_cmds.clone(), Message::Tray)),
             Subscription::run_with_id("spectrum", channel_stream(self.spectrum_rx.clone(), Message::SpectrumData)),
             iced::time::every(Duration::from_secs(3)).map(|_| Message::CheckTheme),
             iced::keyboard::on_key_press(|key, _mods| Some(Message::KeyPressed(key))),
@@ -2415,6 +3046,17 @@ impl AppState {
             }));
         }
 
+        if self.dragging_lyrics {
+            subs.push(iced::event::listen_with(|event, _, _| {
+                use iced::mouse;
+                match event {
+                    iced::Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::LyricsDragMove(position.x)),
+                    iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::LyricsDragEnd),
+                    _ => None,
+                }
+            }));
+        }
+
         if self.dragging_playlist_split {
             subs.push(iced::event::listen_with(|event, _, _| {
                 use iced::mouse;
@@ -2434,10 +3076,14 @@ impl AppState {
     fn play_track_internal(&mut self, track: Track) -> Task<Message> {
         let cover_data = load_cover(&track.path);
         let track = Track { cover_data: cover_data.clone(), ..track };
+        self.cover = cover_data.clone().map(iced::widget::image::Handle::from_bytes);
+        self.cover_rounded = None;
+        let blur = self.cover_task(&track.path, cover_data.clone());
         self.audio.send(AudioCommand::Play(track.path.clone()));
         self.audio.send(AudioCommand::SetVolume(self.volume));
         self.current_track = Some(track.clone());
         self.selected_track = Some(track.clone());
+        self.lyrics_offset = crate::persist::lyrics_offset(&track.path);
         self.playback_state = PlaybackState::Playing;
         self.position = Duration::ZERO;
         self.duration = Duration::ZERO;
@@ -2472,15 +3118,17 @@ impl AppState {
         }
 
         send_track_notification(&track.title, &track.artist);
+        let _ = self.tray_song_tx.send(format!("{} — {}", track.title, track.artist));
 
-        if let Some(y) = self.calculate_scroll_offset(track.id) {
+        let scroll = if let Some(y) = self.calculate_scroll_offset(track.id) {
             iced::widget::scrollable::scroll_to(
                 iced::widget::scrollable::Id::new("tracklist_scroll"),
                 iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (y - 120.0).max(0.0) },
             )
         } else {
             Task::none()
-        }
+        };
+        Task::batch([scroll, blur, self.ensure_lyrics(), self.ensure_lyrics_alt(), self.ensure_furigana()])
     }
 
     fn advance_track(&mut self, delta: i32) -> Task<Message> {
@@ -2529,10 +3177,137 @@ fn cache_cover_path() -> PathBuf {
     PathBuf::from(home).join(".cache/lavanda/cover.jpg")
 }
 
+/// Identifies a set of lyric lines by their text.
+fn furigana_key(lines: &[crate::lyrics::LyricLine]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for l in lines {
+        l.text.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// The cover cropped to a centred square (what the player shows) at 512 px,
+/// with anti-aliased rounded corners; `radius` is a fraction of the width.
+fn rounded_cover(bytes: &[u8], radius: f32) -> Option<iced::widget::image::Handle> {
+    const SIZE: u32 = 512;
+    let img = image::load_from_memory(bytes).ok()?;
+    let side = img.width().min(img.height());
+    let square = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side);
+    let mut px = square.resize_exact(SIZE, SIZE, image::imageops::FilterType::Triangle).to_rgba8();
+    round_corners(&mut px, radius * SIZE as f32);
+    Some(iced::widget::image::Handle::from_rgba(SIZE, SIZE, px.into_raw()))
+}
+
+/// A YouTube thumbnail at 192×108 (shown at 96×54, sharp on HiDPI) with
+/// rounded corners; `radius` in display pixels.
+fn rounded_thumbnail(bytes: &[u8], radius: f32) -> Option<iced::widget::image::Handle> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let mut px = img.resize_to_fill(192, 108, image::imageops::FilterType::Triangle).to_rgba8();
+    round_corners(&mut px, radius * 2.0);
+    Some(iced::widget::image::Handle::from_rgba(px.width(), px.height(), px.into_raw()))
+}
+
+/// Fades the corners out to a radius of `r` pixels, anti-aliased.
+fn round_corners(px: &mut image::RgbaImage, r: f32) {
+    let (w, h) = (px.width() as f32, px.height() as f32);
+    let r = r.clamp(0.0, w.min(h) / 2.0);
+    for (x, y, p) in px.enumerate_pixels_mut() {
+        // Distance into a corner's rounding, measured from pixel centres.
+        let dx = (r - (x as f32 + 0.5)).max((x as f32 + 0.5) - (w - r)).max(0.0);
+        let dy = (r - (y as f32 + 0.5)).max((y as f32 + 0.5) - (h - r)).max(0.0);
+        if dx > 0.0 && dy > 0.0 {
+            let coverage = (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
+            p[3] = (p[3] as f32 * coverage) as u8;
+        }
+    }
+}
+
+/// A tiny blurred copy of a cover. Stretched over the window it becomes a
+/// soft wash of the cover's colours — far cheaper than blurring at full size.
+/// Also measures how bright the cover is and picks its main colour.
+fn blurred_cover(bytes: &[u8]) -> Option<(iced::widget::image::Handle, CoverTone)> {
+    let small = image::load_from_memory(bytes).ok()?.thumbnail(64, 64);
+    let blurred = image::imageops::blur(&small, 3.0);
+    let tone = CoverTone::measure(&blurred);
+    Some((iced::widget::image::Handle::from_rgba(blurred.width(), blurred.height(), blurred.into_raw()), tone))
+}
+
+/// How bright a cover is, and its most vivid colour.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CoverTone {
+    /// Average luminance, 0 (black) – 1 (white).
+    pub luminance: f32,
+    pub accent: iced::Color,
+}
+
+impl CoverTone {
+    fn measure(px: &image::RgbaImage) -> Self {
+        let colours: Vec<[f32; 3]> = px.pixels().map(|p| [p[0], p[1], p[2]].map(|c| c as f32 / 255.0)).collect();
+        let luma = |c: &[f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let luminance = colours.iter().map(luma).sum::<f32>() / colours.len().max(1) as f32;
+        // Accent: the average of the most vivid tenth (saturation × value).
+        let vivid = |c: &[f32; 3]| {
+            let (max, min) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
+            if max == 0.0 { 0.0 } else { (max - min) / max * max }
+        };
+        let mut ranked = colours.clone();
+        ranked.sort_by(|a, b| vivid(b).total_cmp(&vivid(a)));
+        let top = &ranked[..(ranked.len() / 10).max(1)];
+        let sum = top.iter().fold([0.0; 3], |s, c| [s[0] + c[0], s[1] + c[1], s[2] + c[2]]);
+        let n = top.len() as f32;
+        CoverTone { luminance, accent: iced::Color::from_rgb(sum[0] / n, sum[1] / n, sum[2] / n) }
+    }
+
+    /// Covers bright enough that white text on them is hard to read.
+    pub fn is_bright(self) -> bool {
+        self.luminance > 0.55
+    }
+
+    /// Opacity for the blurred cover behind the (dark) theme: bright covers
+    /// are dimmed so the backdrop ends up no brighter than ~35% luminance.
+    pub fn backdrop_opacity(self) -> f32 {
+        const THEME: f32 = 0.12; // the theme background shows through
+        if self.luminance <= 0.35 {
+            0.75
+        } else {
+            ((0.35 - THEME) / (self.luminance - THEME)).clamp(0.2, 0.75)
+        }
+    }
+
+    /// The cover's colour, made light enough to read on the dimmed backdrop.
+    pub fn lyrics_tint(self) -> iced::Color {
+        let c = self.accent;
+        let (max, min) = (c.r.max(c.g).max(c.b), c.r.min(c.g).min(c.b));
+        let lightness = (max + min) / 2.0;
+        // Blend towards white until light enough (≥ 0.8), keeping the hue.
+        let toward_white = ((0.8 - lightness) / (1.0 - lightness).max(0.01)).clamp(0.0, 1.0);
+        let lift = |v: f32| v + (1.0 - v) * toward_white;
+        iced::Color::from_rgb(lift(c.r), lift(c.g), lift(c.b))
+    }
+}
+
 fn send_track_notification(title: &str, artist: &str) {
-    std::process::Command::new("notify-send")
-        .args(["lavanda", &format!("{title} — {artist}"), "--icon=audio-x-generic", "--expire-time=3000", "--urgency=low"])
-        .spawn().ok();
+    spawn_detached(std::process::Command::new("notify-send").args([
+        APP_NAME,
+        &format!("{title} — {artist}"),
+        "--icon=tort-music-player",
+        "--expire-time=3000",
+        "--urgency=low",
+    ]));
+}
+
+/// Starts a helper program without waiting for it, but reaps it once it
+/// exits; a child nobody waits for lingers as a zombie process (one per
+/// track change, for notify-send). Returns whether it started.
+fn spawn_detached(cmd: &mut std::process::Command) -> bool {
+    match cmd.spawn() {
+        Ok(mut child) => {
+            std::thread::spawn(move || child.wait());
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 fn sidebar_width_path() -> PathBuf {
@@ -2561,10 +3336,10 @@ fn build_iced_theme() -> Theme {
 }
 
 pub fn run() -> iced::Result {
-    iced::application("lavanda", AppState::update, AppState::view)
+    iced::application(APP_NAME, AppState::update, AppState::view)
         .subscription(AppState::subscription)
         .default_font(iced::Font {
-            family: iced::font::Family::Name("JetBrainsMono Nerd Font Mono"),
+            family: iced::font::Family::Name(crate::ui::icons::TEXT_FONT_FAMILY),
             weight: iced::font::Weight::Normal,
             stretch: iced::font::Stretch::Normal,
             style: iced::font::Style::Normal,
@@ -2573,7 +3348,36 @@ pub fn run() -> iced::Result {
         .window(iced::window::Settings {
             size: iced::Size::new(960.0, 640.0),
             min_size: Some(iced::Size::new(700.0, 480.0)),
+            // Shown on X11; Wayland compositors take the icon from the
+            // .desktop file matching the application id.
+            icon: iced::window::icon::from_file_data(TUX_PNG, None).ok(),
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "lavanda".into(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .run_with(AppState::new)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CoverTone;
+    use iced::Color;
+
+    #[test]
+    fn bright_covers_are_dimmed_and_tinted() {
+        let white = CoverTone { luminance: 0.95, accent: Color::from_rgb(0.9, 0.9, 0.9) };
+        let pink = CoverTone { luminance: 0.8, accent: Color::from_rgb(0.9, 0.2, 0.5) };
+        let dark = CoverTone { luminance: 0.2, accent: Color::from_rgb(0.1, 0.2, 0.6) };
+        assert!(white.is_bright() && pink.is_bright() && !dark.is_bright());
+        // Dark covers keep today's look; bright ones are dimmed, brighter more.
+        assert_eq!(dark.backdrop_opacity(), 0.75);
+        assert!(white.backdrop_opacity() < pink.backdrop_opacity());
+        assert!(white.backdrop_opacity() <= 0.3);
+        // The tint stays pink but becomes light enough to read.
+        let t = pink.lyrics_tint();
+        assert!((t.r.max(t.g).max(t.b) + t.r.min(t.g).min(t.b)) / 2.0 >= 0.79);
+        assert!(t.r > t.g && t.b > t.g);
+    }
 }

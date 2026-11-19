@@ -27,6 +27,11 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 - **Metadata editor** — press `e`/`m` on any track to edit title, artist, album, genre, year, disc and track number; optionally apply to the whole album; tags written back to the file via lofty
 - **Spectrum visualizer** — FFT bars in the player panel, auto-normalized to the signal level; toggle with `v`
 - **Focus layout** — large cover art centered, library hidden, spectrum at the bottom; toggle with `t`
+- **Furigana** — Japanese lyrics show readings above their kanji (via `kakasi`); a reading that can't be lined up is left out rather than shown wrong
+- **System tray** — a Tux icon in Waybar's tray: left click shows the window (Hyprland), middle click plays/pauses, scroll skips, right click opens a menu (show, play/pause, next, previous, quit); the tooltip shows the current song
+- **Playlist files** — export a playlist as a tiny CSV of YouTube ids (export icon on the selected playlist), import one with the download icon next to `+`: songs you have are linked, missing ones are downloaded with yt-dlp
+- **Adaptive colours** — with the blurred-cover background, bright covers are dimmed and the lyrics take a light tint of the cover's colour so they stay readable
+- **Synced lyrics** — a side panel (or beside the cover in focus layout) where the current line lights up and the text glides along with the song, like Apple Music or Spotify; scroll to look around, click a line to jump there; drag the panel's left edge to resize it; toggle with `k` or the microphone button. If a song's lyrics run early or late (e.g. timed for a version without the music video's intro), right-click the line being sung to re-sync it, or nudge with `[` / `]`; the adjustment is remembered per song. For Japanese songs a **Romaji** switch at the top of the panel flips between Japanese and romaji: romaji comes from a matching romaji upload on LRCLIB when there is one, otherwise it is converted with `kakasi` (`sudo pacman -S kakasi`); songs whose lyrics arrive in romaji get their Japanese original from LRCLIB. Lyrics come from a `.lrc` file next to the song (same name), then the file's embedded lyrics tag, then [LRCLIB](https://lrclib.net) via `curl`. Online results are cached in `~/.cache/lavanda/lyrics/`; synced lyrics are only used when their timing fits the file, otherwise the words are shown unsynced
 - **Resizable panels** — drag the sidebar divider and the playlist-panel divider; sidebar width is persisted across sessions
 - **Session state** — volume is restored on next launch
 - **MPRIS2** — full D-Bus integration; works with `playerctl`, Waybar `mpris` module, AGS, EWW, etc.
@@ -118,6 +123,16 @@ theme_preset = "lavender"
 background_image = ""
 # Translucent "glass" panels. A background image forces this on.
 use_glassmorphism = true
+
+# Spectrum bars: "mirrored" (above and below a centre line) or "bottom"
+spectrum_style = "mirrored"
+# Album cover size in the player panel, 140–400 px (focus layout: 1.4×)
+cover_size = 240.0
+# background_kind = "album" uses a blurred copy of the playing track's cover
+
+# Look up lyrics on lrclib.net (sends the playing track's title, artist and
+# duration) when there is no .lrc file or embedded lyrics. false = local only.
+lyrics_online = true
 ```
 
 Volume is restored on next launch via `~/.config/lavanda/state.toml`. Library data — liked songs, play counts, playlists, recently played and column layout — is persisted to `~/.config/lavanda/db.json`.
@@ -216,6 +231,8 @@ These work when the lavanda window is focused.
 | `a` | add the selected track to a playlist |
 | `t` | toggle focus layout (large cover, library hidden) |
 | `v` | toggle spectrum visualizer |
+| `k` | toggle synced lyrics |
+| `[` / `]` | lyrics 0.5 s earlier / later for this song (right-click a lyric line to sync it to now) |
 | `F5` | rescan the library |
 | `?` or `Ctrl+K` | keybinding reference |
 | `Ctrl+,` | open settings (theme, background image, glassmorphism) |

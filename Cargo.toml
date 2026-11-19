@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # GUI
-iced = { version = "0.13", features = ["image", "canvas", "tokio"] }
+iced = { version = "0.13", features = ["image", "canvas", "tokio", "advanced"] }
 
 # Native file picker (background image)
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
@@ -21,6 +21,10 @@ lofty = "0.21"
 
 # MPRIS2 (D-Bus)
 mpris-server = "0.8"
+
+# System tray icon (StatusNotifierItem + dbusmenu); the same zbus the file
+# dialogs already pull in.
+zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 
 # Scanner de diretório
 walkdir = "2"
