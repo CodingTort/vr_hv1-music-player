@@ -1,0 +1,48 @@
+# Changelog
+
+All notable changes to this project. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+[Semantic Versioning](https://semver.org/).
+
+## [1.1.0] - 2026-11-20
+
+The first release of this fork, based on [lavanda](https://github.com/sheep-farm/lavanda) 1.0.1.
+
+### Added
+
+- **Synced lyrics panel**: highlights the line being sung, glides with the song, click to seek, drag to
+  resize. Also available beside the cover in the focus layout.
+- Lyrics from a `.lrc` file next to the song, embedded lyrics, or LRCLIB, with lookups that understand
+  YouTube-style titles and covers.
+- Per-song lyrics timing: right-click the current line, or nudge with `[` / `]`.
+- **Japanese ⇄ Romaji switch**, with romaji from a matching LRCLIB upload when there is one.
+- **Furigana** above kanji, using MeCab when installed and kakasi otherwise.
+- **YouTube search and download** through yt-dlp, with thumbnails.
+- **Playlist export and import** as a CSV of YouTube IDs.
+- **System tray icon** with menu and song tooltip.
+- Settings dialog: nine theme presets, glass panels, corner radius, and colour, gradient, image or
+  blurred-album-cover backgrounds.
+- Adjustable cover size and a mirrored visualiser style.
+- `make install` / `make uninstall`.
+
+### Changed
+
+- Shown as **Tort's Music Player** with a Tux icon. The program name and config directory stay `lavanda`.
+- Rounded card layout with even spacing; covers are rounded and framed.
+- UDEV Gothic NF for text, so Latin and Japanese match. Japanese, Chinese and Korean text no longer
+  shows as boxes.
+- YouTube thumbnails used as covers are shown whole instead of centre-cropped.
+- Bright covers dim the blurred background, and lyrics take a tint that stays readable.
+- The spectrum visualiser uses a decibel scale and follows the music's loudness instead of the volume slider.
+
+### Fixed
+
+- The last second of every song was cut off.
+- The playback position ran about a second ahead of the audio.
+- Files with an unknown length showed no progress.
+- yt-dlp downloads failed on YouTube's intermittent HTTP 403 errors; searches took up to a minute.
+- Switching between Japanese and romaji moved the highlighted line.
+- Lyrics uploads with a translation woven in highlighted the translation.
+- Leftover `notify-send` processes piled up.
+
+[1.1.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.0

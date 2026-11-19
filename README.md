@@ -1,313 +1,330 @@
-# lavanda
+<div align="center">
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](Cargo.toml)
-[![Wayland](https://img.shields.io/badge/Wayland-native-cyan.svg)](https://wayland.freedesktop.org)
+<img src="assets/tux.png" width="96" alt="">
 
-A native Wayland music player written in Rust, built for [Omarchy](https://omarchy.org/) / Hyprland rices. Follows the active Omarchy theme automatically — colors update live when you switch themes.
+# vr_hv1's music client
 
-![lavanda](https://raw.githubusercontent.com/sheep-farm/lavanda/master/assets/screenshot.png)
+**A fast, native Linux music player with synced lyrics, furigana, romaji and YouTube downloads.**
+It shows up on your desktop as *Tort's Music Player*.
 
----
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-blue.svg)](#requirements)
+[![Wayland & X11](https://img.shields.io/badge/Wayland%20%26%20X11-native-cyan.svg)](#requirements)
 
-## Features
+![Main window: library, player with visualiser, and the synced lyrics panel with furigana](docs/screenshots/main.png)
 
-- **Audio formats** — MP3, FLAC, OGG, Opus, WAV, AAC, M4A, AIFF and more via [Symphonia](https://github.com/pdeljanov/Symphonia)
-- **Indexed library** — `~/Music` is scanned on launch and browsed by **Artists**, **Albums** or **Genres** from the sidebar
-- **Sortable, configurable columns** — title, artist, album, genre, year, disc, duration, play count, date played; click a header to sort, right-click to show/hide columns
-- **Playlists** — create, rename (double-click), delete custom playlists; add tracks or whole albums via right-click
-- **Auto-playlists** — Liked Songs, Recently Played and Most Played, maintained automatically
-- **Liked songs & play counts** — toggle a favorite with `l`/`f`; plays are counted and persisted to `~/.config/lavanda/db.json`
-- **Multi-selection** — `Ctrl+Click` to toggle, `Shift+Click` to range-select; context-menu actions apply to the whole selection
-- **Album art** — embedded cover tag displayed; falls back to `cover.jpg`, `Cover.jpg`, `folder.jpg` (and `.png`, `.webp` variants) in the same directory
-- **Real seek** — click anywhere on the progress bar to jump
-- **Dynamic volume** — slider takes effect immediately, mid-playback
-- **Shuffle & repeat** — per-session
-- **Metadata editor** — press `e`/`m` on any track to edit title, artist, album, genre, year, disc and track number; optionally apply to the whole album; tags written back to the file via lofty
-- **Spectrum visualizer** — FFT bars in the player panel, auto-normalized to the signal level; toggle with `v`
-- **Focus layout** — large cover art centered, library hidden, spectrum at the bottom; toggle with `t`
-- **Furigana** — Japanese lyrics show readings above their kanji (via `kakasi`); a reading that can't be lined up is left out rather than shown wrong
-- **System tray** — a Tux icon in Waybar's tray: left click shows the window (Hyprland), middle click plays/pauses, scroll skips, right click opens a menu (show, play/pause, next, previous, quit); the tooltip shows the current song
-- **Playlist files** — export a playlist as a tiny CSV of YouTube ids (export icon on the selected playlist), import one with the download icon next to `+`: songs you have are linked, missing ones are downloaded with yt-dlp
-- **Adaptive colours** — with the blurred-cover background, bright covers are dimmed and the lyrics take a light tint of the cover's colour so they stay readable
-- **Synced lyrics** — a side panel (or beside the cover in focus layout) where the current line lights up and the text glides along with the song, like Apple Music or Spotify; scroll to look around, click a line to jump there; drag the panel's left edge to resize it; toggle with `k` or the microphone button. If a song's lyrics run early or late (e.g. timed for a version without the music video's intro), right-click the line being sung to re-sync it, or nudge with `[` / `]`; the adjustment is remembered per song. For Japanese songs a **Romaji** switch at the top of the panel flips between Japanese and romaji: romaji comes from a matching romaji upload on LRCLIB when there is one, otherwise it is converted with `kakasi` (`sudo pacman -S kakasi`); songs whose lyrics arrive in romaji get their Japanese original from LRCLIB. Lyrics come from a `.lrc` file next to the song (same name), then the file's embedded lyrics tag, then [LRCLIB](https://lrclib.net) via `curl`. Online results are cached in `~/.cache/lavanda/lyrics/`; synced lyrics are only used when their timing fits the file, otherwise the words are shown unsynced
-- **Resizable panels** — drag the sidebar divider and the playlist-panel divider; sidebar width is persisted across sessions
-- **Session state** — volume is restored on next launch
-- **MPRIS2** — full D-Bus integration; works with `playerctl`, Waybar `mpris` module, AGS, EWW, etc.
-- **Nerd Font icons** — Font Awesome tier-1 codepoints (universal across any Nerd Font)
-- **Live Omarchy theming** — reads `~/.config/omarchy/current/theme.name` and updates the palette within 3 seconds of a theme switch; no restart required
-- **i18n** — English, Portuguese (pt_BR) and Spanish; auto-detected from `$LANG`
+</div>
 
----
+An enhanced fork of [lavanda](https://github.com/sheep-farm/lavanda), built for people who want more
+control over how their player looks, who keep their music as local files, and who listen to a lot of
+Japanese music.
+
+## Contents
+
+- [Highlights](#highlights)
+- [Quick start (Arch Linux)](#quick-start-arch-linux)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Using it](#using-it)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Configuration](#configuration)
+- [Desktop integration](#desktop-integration)
+- [Privacy](#privacy)
+- [Project layout](#project-layout)
+- [Contributing](#contributing)
+- [Credits](#credits)
+- [License](#license)
+
+## Highlights
+
+**Lyrics**
+- **Synced lyrics panel**: the line being sung lights up and the text glides along with the song.
+  Click a line to jump there, scroll to look around, drag the panel edge to resize it.
+- Lyrics come from a `.lrc` file next to the song, the file's embedded lyrics, or [LRCLIB](https://lrclib.net).
+  Lookups understand YouTube-style titles (`【Artist】Song (Official Video)`) and covers (`歌ってみた`, `Cover`).
+- **Per-song timing fix**: if lyrics run early or late, right-click the line being sung, or nudge with `[` / `]`.
+  The adjustment is remembered.
+- Uploads with a translation woven in are skipped when a clean version exists.
+
+**Japanese**
+- **Furigana** above every kanji, using MeCab's grammar-aware readings (kakasi as a fallback).
+- **Japanese ⇄ Romaji switch** in the lyrics panel. Both versions share the same timing, so switching
+  never moves the highlighted line.
+
+**Look and feel**
+- Rounded, evenly spaced cards with an adjustable corner radius, plus optional glass (translucent) panels.
+- **Blurred album-cover background** that dims bright covers and tints the lyrics to stay readable.
+- Large framed cover art. YouTube thumbnails are shown whole instead of cropped and zoomed in.
+- A sensitive, mirrored spectrum visualiser that follows the music's loudness.
+- Nine built-in themes, or follow your [Omarchy](https://omarchy.org) theme live.
+- Focus layout (`t`): big cover, lyrics alongside, library hidden.
+
+![Focus layout with the cover, controls and lyrics side by side](docs/screenshots/focus.png)
+
+**Library and downloads**
+- **YouTube search and download** (`y`) through yt-dlp, with thumbnails and automatic retries.
+- **Playlist files**: export a playlist as a tiny CSV of YouTube IDs and import it on another machine.
+  Songs you already have are linked, and missing ones are downloaded.
+- Plays MP3, FLAC, OGG, Opus, WAV, AAC, M4A, AIFF and more. Browse by artist, album or genre.
+- Liked songs, play counts, Recently Played and Most Played lists, multi-select and a tag editor.
+
+**Desktop**
+- **System tray icon** with play/pause, next, previous and a song tooltip.
+- **MPRIS2**: works with `playerctl`, Waybar, media keys and desktop widgets.
+- Desktop notifications when the track changes.
+
+## Quick start (Arch Linux)
+
+```bash
+# Build tools, runtime and fonts
+sudo pacman -S --needed base-devel git rust alsa-lib yt-dlp ffmpeg curl kakasi \
+    noto-fonts-cjk ttf-jetbrains-mono-nerd libnotify xdg-desktop-portal-gtk
+
+# Better Japanese readings (optional, from the AUR)
+yay -S mecab mecab-ipadic
+
+# Build and install for your user (to ~/.local)
+git clone https://github.com/CodingTort/vr_hv1-s-music-client.git
+cd vr_hv1-s-music-client
+make install
+```
+
+Then install the [UDEV Gothic NF](#fonts) font, make sure `~/.local/bin` is on your `PATH`, and launch
+**Tort's Music Player** from your app launcher or run `lavanda`. Your music is read from `~/Music`.
 
 ## Requirements
 
-| Requirement | Notes |
-|---|---|
-| Rust ≥ 1.75 | `rustup` recommended |
-| A Nerd Font | `JetBrainsMono Nerd Font Mono` by default; any Nerd Font works |
-| PipeWire or PulseAudio | Audio output via cpal |
-| D-Bus session bus | For MPRIS2 (`DBUS_SESSION_BUS_ADDRESS` must be set) |
-| Wayland compositor | Tested on Hyprland; works on any wlroots compositor |
+### To build
 
----
+| Dependency | Why | Arch | Debian / Ubuntu | Fedora |
+|---|---|---|---|---|
+| Rust **1.89 or newer** | compiler | `rust` (or `rustup`) | use [rustup](https://rustup.rs): distro packages are too old | `rust cargo` |
+| C toolchain and `make` | linking, `make install` | `base-devel` | `build-essential` | `gcc make` |
+| `pkg-config` | finds ALSA | `pkgconf` (in `base-devel`) | `pkg-config` | `pkgconf-pkg-config` |
+| ALSA headers | audio output | `alsa-lib` | `libasound2-dev` | `alsa-lib-devel` |
+
+### To run
+
+These are already present on any normal Linux desktop:
+
+- A **Wayland** compositor (tested on Hyprland) or an **X11** session
+- Working **GPU drivers** (Vulkan or OpenGL, e.g. Mesa)
+- **PipeWire**, PulseAudio or plain ALSA for sound
+- A **D-Bus** session bus (for MPRIS and the tray icon)
+
+### Optional features
+
+Everything below is optional. When a tool is missing, the app keeps working and that one feature tells
+you what to install.
+
+| Feature | Needs | Arch | Debian / Ubuntu | Fedora |
+|---|---|---|---|---|
+| YouTube search and download | `yt-dlp`, `ffmpeg` | `yt-dlp ffmpeg` | `yt-dlp ffmpeg` (or yt-dlp's [official release](https://github.com/yt-dlp/yt-dlp#installation), which stays current) | `yt-dlp ffmpeg` (RPM Fusion) |
+| Online lyrics, YouTube thumbnails | `curl` | `curl` | `curl` | `curl` |
+| Romaji and furigana | `kakasi` | `kakasi` | `kakasi` | `kakasi` |
+| Accurate Japanese readings (recommended alongside kakasi) | `mecab` with the IPAdic dictionary | AUR: `mecab mecab-ipadic` | `mecab mecab-ipadic-utf8` | `mecab mecab-ipadic` |
+| Track-change notifications | `notify-send` | `libnotify` | `libnotify-bin` | `libnotify` |
+| File dialogs (background image, playlist import/export) | an XDG desktop portal | `xdg-desktop-portal-gtk` (or `-hyprland`, `-kde`) | `xdg-desktop-portal-gtk` | `xdg-desktop-portal-gtk` |
+| Tray icon | a StatusNotifierItem tray (Waybar `tray`, KDE, GNOME with AppIndicator) | — | — | — |
+| "Show window" from the tray | Hyprland (`hyprctl`) | — | — | — |
+| Live theme following | [Omarchy](https://omarchy.org) | — | — | — |
+| Command-line control | `playerctl` | `playerctl` | `playerctl` | `playerctl` |
+
+### Fonts
+
+| Font | Used for | Install |
+|---|---|---|
+| **UDEV Gothic NF** | all text: Latin and Japanese in one matching style | Download `UDEVGothic_NF_*.zip` from the [UDEV Gothic releases](https://github.com/yuru7/udev-gothic/releases), copy the `UDEVGothicNF-*.ttf` files to `~/.local/share/fonts/`, then run `fc-cache -f` |
+| **JetBrainsMono Nerd Font** | icons | Arch: `ttf-jetbrains-mono-nerd`, others: [nerdfonts.com](https://www.nerdfonts.com/font-downloads) |
+| **Noto Sans CJK** | fallback for Chinese/Korean/Japanese text | Arch: `noto-fonts-cjk`, Debian: `fonts-noto-cjk`, Fedora: `google-noto-sans-cjk-fonts` |
 
 ## Installation
 
-### Prebuilt binary (no Rust needed)
-
 ```bash
-curl -LO https://github.com/sheep-farm/lavanda/releases/download/v1.0.1/lavanda-1.0.1-x86_64-linux.tar.gz
-tar xzf lavanda-1.0.1-x86_64-linux.tar.gz
-install -Dm755 lavanda ~/.local/bin/lavanda
+git clone https://github.com/CodingTort/vr_hv1-s-music-client.git
+cd vr_hv1-s-music-client
+make install          # builds in release mode, installs to ~/.local
 ```
 
-### From source
+`make install` puts these files in place:
 
-```bash
-git clone https://github.com/sheep-farm/lavanda
-cd lavanda
-cargo build --release
-install -Dm755 target/release/lavanda ~/.local/bin/lavanda
-```
+| File | Location |
+|---|---|
+| program | `~/.local/bin/lavanda` |
+| app launcher entry | `~/.local/share/applications/lavanda.desktop` |
+| icon | `~/.local/share/icons/hicolor/{scalable,256x256}/apps/tort-music-player.*` |
 
-### Desktop entry
+To install system-wide instead, build as yourself, then copy the files as root:
+`make && sudo make install-files PREFIX=/usr/local`. To remove it again, run `make uninstall` with the
+same `PREFIX` (and `sudo` for a system-wide install).
 
-```bash
-cp assets/lavanda.desktop ~/.local/share/applications/
-```
+Other useful targets: `make` (build only), `make test` (run the test suite), `make run`.
 
-### With cargo install
+> The program is called `lavanda` because its settings and library data live in `~/.config/lavanda`,
+> shared with the original project. If you are coming from lavanda, your library, playlists and settings
+> carry over.
 
-```bash
-cargo install --git https://github.com/sheep-farm/lavanda
-```
+## Using it
 
----
+**Your library.** Put music in `~/Music` (or set `music_dir`). It is scanned at start-up; press `F5` after
+adding files. Browse by Artists, Albums or Genres in the sidebar. Covers come from the file's embedded art,
+or from `cover.jpg` / `folder.jpg` next to it.
+
+**Lyrics.** Press `k` or click the microphone button. To use your own lyrics, save a `.lrc` file with
+the same name as the song next to it. If the lyrics are early or late, right-click the line that is being
+sung right now; the offset is saved for that song.
+
+**Japanese songs.** Use the **Romaji** switch at the top of the lyrics panel. Japanese mode shows furigana
+over the kanji. Install MeCab for the most accurate readings: without it, kakasi is used, which
+sometimes misreads conjugated verbs and set phrases.
+
+**YouTube.** Press `y`, search, and press Enter or click a result to download it into your library.
+Files are tagged automatically, including the video ID, which playlist files rely on.
+
+**Playlist files.** Select a playlist and click its export icon to save a `.csv`. Use the import icon next
+to `+` to load one: matching songs are linked, and missing ones are downloaded from YouTube one by one.
+The format is `youtube_id,title,artist`, one song per line.
+
+**Settings.** Click the gear icon or press `Ctrl+,` to change the theme, glass panels, corner radius,
+background (colour, gradient, image or blurred album cover), cover size and visualiser style.
+
+## Keyboard shortcuts
+
+| Key | Action | | Key | Action |
+|---|---|---|---|---|
+| `Space` | play / pause | | `k` | lyrics panel |
+| `n` / `p` | next / previous | | `[` / `]` | lyrics 0.5 s earlier / later |
+| `→` / `←` | seek | | `t` | focus layout |
+| `+` / `-` | volume | | `v` | visualiser |
+| `s` / `r` | shuffle / repeat | | `y` | YouTube search |
+| `↑` / `↓`, `Enter` | move, play | | `c` / `a` | new playlist / add to playlist |
+| `/` | search | | `l` | like |
+| `F5` | rescan library | | `e` | edit tags |
+| `Ctrl+,` | settings | | `?` | all shortcuts |
+
+Mouse: double-click a track to play it, right-click for context menus, `Ctrl+Click` / `Shift+Click` to
+select several.
 
 ## Configuration
 
-lavanda generates `~/.config/lavanda/config.toml` on first run with all options set to their defaults.
+Settings are written to `~/.config/lavanda/config.toml` on first launch. Most of them can be changed in
+the Settings dialog; every option is listed here:
 
 ```toml
-# ~/.config/lavanda/config.toml
-
-# Path to your music library. Scanned on launch and browsed by artist/album/genre.
-music_dir = "~/Music"
-
-# Initial volume (0.0 = mute, 1.0 = 100%)
+music_dir = "~/Music"            # your library, scanned at start-up
 volume = 0.8
-
-# Start with shuffle enabled
 shuffle = false
-
-# Start with repeat enabled
 repeat = false
-
-# Interface language: "auto", "en", "pt_BR", "es"
-language = "auto"
-
-# Seek step in seconds for the ← / → arrow keys
-seek_step = 5
-
-# Volume delta per + / - keypress
+language = "auto"                # "auto", "en", "pt_BR", "es"
+seek_step = 5                    # seconds per ← / →
 volume_step = 0.05
 
-# Theme: "auto" follows the live Omarchy theme, "manual" uses a built-in preset
-theme_mode = "auto"
-# Built-in presets: "lavender", "vampire", "cotton candy", "catppuccin mocha", "tokyo night"
-theme_preset = "lavender"
-
-# Optional background image (empty = none). Supports "~" expansion.
+# Appearance
+theme_mode = "auto"              # "auto" follows Omarchy, "manual" uses theme_preset
+theme_preset = "lavender"        # lavender, vampire, cotton candy, catppuccin mocha,
+                                 # tokyo night, nord, gruvbox, everforest, rose pine
+use_glassmorphism = true         # translucent panels
+corner_radius = 10.0
+background_kind = "none"         # "none", "color", "gradient", "image", "album" (blurred cover)
+background_color = "#11111b"
+background_gradient_from = "#1e1b2e"
+background_gradient_to = "#0f0e17"
+background_gradient_angle = 135.0
 background_image = ""
-# Translucent "glass" panels. A background image forces this on.
-use_glassmorphism = true
+cover_size = 240.0               # 140–400 px
+spectrum_style = "mirrored"      # "mirrored" or "bottom"
 
-# Spectrum bars: "mirrored" (above and below a centre line) or "bottom"
-spectrum_style = "mirrored"
-# Album cover size in the player panel, 140–400 px (focus layout: 1.4×)
-cover_size = 240.0
-# background_kind = "album" uses a blurred copy of the playing track's cover
+# Lyrics
+lyrics_online = true             # look lyrics up on lrclib.net; false = local files only
 
-# Look up lyrics on lrclib.net (sends the playing track's title, artist and
-# duration) when there is no .lrc file or embedded lyrics. false = local only.
-lyrics_online = true
+# YouTube (yt-dlp)
+yt_dlp_path = "yt-dlp"
+yt_dlp_format = "mp3"            # any format yt-dlp's --audio-format accepts
+yt_dlp_quality = "128K"
+yt_dlp_output = "%(title)s.%(ext)s"
+yt_search_results = 15
 ```
 
-Volume is restored on next launch via `~/.config/lavanda/state.toml`. Library data — liked songs, play counts, playlists, recently played and column layout — is persisted to `~/.config/lavanda/db.json`.
-
-The same options are editable from the in-app **Settings** dialog (gear icon in the header, or `Ctrl+,`), which includes a native file picker for the background image.
-
----
-
-## Music library
-
-lavanda scans `~/Music` recursively on launch and builds an in-memory index. The sidebar browses it by **Artists**, **Albums** or **Genres** (switch with the tabs at the top), with a filter box to narrow the list. Press `F5` to rescan after adding files.
-
-**Tag fallback hierarchy:**
-- No artist tag → parent folder name
-- No album tag → immediate parent folder name
-- No title tag → filename stem
-
-**Playlists** are managed inside the app: create one with `c` or the `+` button, double-click to rename, and add tracks or whole albums through the right-click menu. Liked Songs, Recently Played and Most Played are maintained automatically. Custom playlists, likes, play counts and recently-played history are stored in `~/.config/lavanda/db.json`.
-
-**Cover art lookup order:**
-1. Embedded tag (CoverFront or Other picture type)
-2. `cover.jpg`, `Cover.jpg`, `cover.png`, `Cover.png`, `cover.webp`, `Cover.webp`
-3. `folder.jpg`, `Folder.jpg`, `folder.png`, `Folder.png`
-
----
-
-## Omarchy theming
-
-lavanda reads the active Omarchy theme from `~/.config/omarchy/current/theme.name` and maps its `colors.toml` to the UI palette:
-
-| `colors.toml` key | lavanda role |
+| Data | Where |
 |---|---|
-| `background` | window background |
-| `foreground` | primary text |
-| `accent` | accent color (highlights, active elements) |
-| `color8` | muted/overlay color; also used to derive surface shades |
-| `color1` | red (error status bar) |
-| `color2` | green |
-| `color15` | subtext |
+| settings | `~/.config/lavanda/config.toml` |
+| volume, lyrics panel (shown, width, romaji) | `~/.config/lavanda/state.toml` |
+| playlists, likes, play counts, lyric offsets | `~/.config/lavanda/db.json` |
+| downloaded lyrics | `~/.cache/lavanda/lyrics/` |
 
-Works with all built-in Omarchy themes (Catppuccin, Nord, Gruvbox, Tokyo Night, Rosé Pinè, etc.) and custom user themes in `~/.config/omarchy/themes/`.
+## Desktop integration
 
-If you'd rather not follow the desktop theme, set `theme_mode = "manual"` (or pick it in the Settings dialog) and choose one of the bundled presets — `lavender`, `vampire`, `cotton candy`, `catppuccin mocha`, `tokyo night`. Manual mode ignores the live Omarchy theme.
-
-### Waybar integration
+**Waybar.** The tray icon appears in Waybar's `tray` module. To show the current song, add an `mpris` module:
 
 ```jsonc
 "mpris": {
     "format": "{player_icon}  {title} — {artist}",
-    "format-paused": "{player_icon}  {title} — {artist}",
-    "format-stopped": "",
     "player-icons": { "lavanda": "󰝚", "default": "󰝚" },
-    "status-icons": { "paused": "󰏤", "playing": "󰐊", "stopped": "󰓛" },
-    "max-length": 45,
-    "on-click": "playerctl play-pause",
-    "on-click-right": "playerctl next",
-    "on-scroll-up": "playerctl next",
-    "on-scroll-down": "playerctl previous",
-    "tooltip-format": "{title}\n{artist} — {album}"
+    "on-click": "playerctl -p lavanda play-pause",
+    "on-scroll-up": "playerctl -p lavanda next",
+    "on-scroll-down": "playerctl -p lavanda previous"
 }
 ```
 
----
-
-## Keybindings
-
-These work when the lavanda window is focused.
-
-### Navigation
-
-| Key | Action |
-|---|---|
-| `↑` / `↓` | move cursor within the track list |
-| `Enter` | play the selected track |
-
-### Playback
-
-| Key | Action |
-|---|---|
-| `Space` | play / pause |
-| `→` / `←` | seek forward / backward |
-| `n` / `p` | next / previous track |
-| `s` | toggle shuffle |
-| `r` | toggle repeat |
-| `+` or `=` | volume up |
-| `-` | volume down |
-
-### Library
-
-| Key | Action |
-|---|---|
-| `/` | search / filter tracks |
-| `l` / `f` | like / unlike the selected track |
-| `e` / `m` | edit metadata of the selected track |
-| `c` | create a playlist |
-| `a` | add the selected track to a playlist |
-| `t` | toggle focus layout (large cover, library hidden) |
-| `v` | toggle spectrum visualizer |
-| `k` | toggle synced lyrics |
-| `[` / `]` | lyrics 0.5 s earlier / later for this song (right-click a lyric line to sync it to now) |
-| `F5` | rescan the library |
-| `?` or `Ctrl+K` | keybinding reference |
-| `Ctrl+,` | open settings (theme, background image, glassmorphism) |
-| `Escape` | close any overlay |
-
-Mouse: double-click a track to play it; right-click a track, artist, album or column header for context actions; `Ctrl+Click` / `Shift+Click` to multi-select.
-
-For system-wide controls (lavanda running in background), wire `playerctl` to your compositor:
+**Global shortcuts (Hyprland).**
 
 ```ini
-# hyprland.conf
-bind = SUPER, F5, exec, playerctl play-pause
-bind = SUPER, F6, exec, playerctl previous
-bind = SUPER, F7, exec, playerctl next
+bind = , XF86AudioPlay, exec, playerctl -p lavanda play-pause
+bind = , XF86AudioNext, exec, playerctl -p lavanda next
+bind = , XF86AudioPrev, exec, playerctl -p lavanda previous
 ```
 
----
+**Tray icon.** Left click shows the window, middle click plays or pauses, scrolling skips tracks, and
+right click opens the menu.
 
-## playerctl
+## Privacy
 
-```bash
-playerctl -p lavanda play-pause
-playerctl -p lavanda next
-playerctl -p lavanda previous
-playerctl -p lavanda metadata
-```
+The player works fully offline. It only goes online for these:
 
----
+| What | Sends | To |
+|---|---|---|
+| Lyrics lookup (turn off with `lyrics_online = false`) | the playing song's title, artist and length | lrclib.net |
+| YouTube search and download | your search text, or the video you picked | YouTube, via yt-dlp |
+| Search-result thumbnails | the video ID | i.ytimg.com |
 
-## Architecture
+Nothing else leaves your computer.
+
+## Project layout
 
 ```
 src/
-├── main.rs
-├── app.rs              # iced Application — state, messages, subscriptions
-├── config.rs           # config.toml parsing and defaults
-├── state.rs            # session state persistence (state.toml)
-├── persist.rs          # library data store (db.json): likes, play counts, playlists, columns
-├── locale.rs           # i18n strings (en, pt_BR, es)
-├── audio/
-│   ├── player.rs       # symphonia decode + cpal output (dedicated thread)
-│   ├── spectrum.rs     # FFT spectrum analysis
-│   └── mpris.rs        # MPRIS2 D-Bus server via mpris-server
-├── library/
-│   ├── scanner.rs      # library scan (walkdir + lofty); cover loader
-│   └── models.rs       # Track
+├── main.rs, app.rs         application state, messages, window
+├── lyrics.rs               lyrics lookup, LRC parsing, romaji, furigana (MeCab / kakasi)
+├── youtube.rs              yt-dlp search and download
+├── playlist_io.rs          playlist CSV export / import
+├── tray.rs                 system tray icon (StatusNotifierItem + dbusmenu)
+├── config.rs, state.rs, persist.rs, locale.rs
+├── audio/                  decoding and output, spectrum analysis, MPRIS
+├── library/                library scanner, track model
 └── ui/
-    ├── theme.rs        # Omarchy theme reader, live palette, container styles
-    ├── icons.rs        # Nerd Font codepoints and UI font constants
-    ├── views/          # library view, player panel, focus layout
-    └── components/     # progress bar, controls, spectrum, tag editor, playlist dialog
+    ├── theme.rs, icons.rs
+    ├── views/              library, player, focus layout, lyrics panel
+    └── components/         lyrics view, visualiser, dialogs, controls
+assets/                     icon (Tux) and desktop entry
 ```
 
-Track metadata lives in memory for the session; library state (likes, play counts, playlists, recently played, column layout) is persisted as JSON in `~/.config/lavanda/db.json`.
+## Contributing
 
----
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in
+the [changelog](CHANGELOG.md).
 
-## Status
+## Credits
 
-**1.0.1** — functional for daily use.
+- Based on [**lavanda**](https://github.com/sheep-farm/lavanda) by Flavio de Vasconcellos (MIT).
+- Icon: [**Tux**](https://commons.wikimedia.org/wiki/File:Tux.svg) by Larry Ewing (lewing@isc.tamu.edu), created with The GIMP.
+- Lyrics from [**LRCLIB**](https://lrclib.net), a free and open lyrics database.
+- Japanese readings by [**MeCab**](https://taku910.github.io/mecab/) and [**KAKASI**](http://kakasi.namazu.org/).
+- Downloads by [**yt-dlp**](https://github.com/yt-dlp/yt-dlp). Font: [**UDEV Gothic**](https://github.com/yuru7/udev-gothic) by Yuko Otawara.
+- Built with [iced](https://iced.rs), [Symphonia](https://github.com/pdeljanov/Symphonia), [cpal](https://github.com/RustAudio/cpal), [lofty](https://github.com/Serial-ATA/lofty-rs) and [zbus](https://github.com/dbus2/zbus).
 
-Known limitations:
-- Seek accuracy depends on the container format (Symphonia limitation)
-- No gapless playback between tracks
-
----
-
-## Lineage
-
-Version **1.0.1** is the product of **convergent evolution with [OmaTunes](https://github.com/Balthazzahr/omatunes)**, a sibling project by the same author that forked from an early lavanda and explored playlists, an indexed library, play counts and a richer tag editor. lavanda 1.0.1 folds those ideas back into the original codebase. The two projects share a common git ancestry and the same MIT license; parts of the library-state store (`persist.rs`) and the `Track` model originate from OmaTunes.
-
-The development model behind this — fork, diverge, and selectively reintegrate — is described in [DEVELOPMENT.md](DEVELOPMENT.md).
-
----
+Please only download music you have the right to download.
 
 ## License
 
-MIT
+[MIT](LICENSE). Copyright © 2026 CodingTort, and © 2026 Flavio de Vasconcellos for the original lavanda code.
