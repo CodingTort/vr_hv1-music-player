@@ -13,18 +13,7 @@ const SAMPLE_RATE: f32 = 48000.0;
 
 pub fn launch(viz_buf: Arc<Mutex<VecDeque<f32>>>, tx: UnboundedSender<Vec<f32>>) {
     std::thread::spawn(move || {
-        let mut planner = FftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(FFT_SIZE);
-        let mut scratch = vec![Complex::default(); fft.get_inplace_scratch_len()];
-
-        let hann: Vec<f32> = (0..FFT_SIZE)
-            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (FFT_SIZE - 1) as f32).cos()))
-            .collect();
-
-        // Peak follower: decays ~94% per second at 30 fps so the display
-        // adapts to both quiet and loud passages in a few seconds.
-        let mut peak: f32 = 1e-6;
-
+        let mut analyzer = Analyzer::new();
         loop {
             std::thread::sleep(Duration::from_millis(33));
 
@@ -41,58 +30,128 @@ pub fn launch(viz_buf: Arc<Mutex<VecDeque<f32>>>, tx: UnboundedSender<Vec<f32>>)
                 out
             };
 
-            let mut buf: Vec<Complex<f32>> = samples
-                .iter()
-                .zip(hann.iter())
-                .map(|(&s, &w)| Complex { re: s * w, im: 0.0 })
-                .collect();
-
-            fft.process_with_scratch(&mut buf, &mut scratch);
-
-            let mags: Vec<f32> = buf[..FFT_SIZE / 2]
-                .iter()
-                .map(|c| c.norm() / (FFT_SIZE as f32 / 4.0))
-                .collect();
-
-            // Update peak follower: rise instantly, decay slowly
-            let frame_max = mags.iter().copied().fold(0.0f32, f32::max);
-            peak = peak.max(frame_max) * 0.998;
-            peak = peak.max(1e-6);
-
-            // Normalize mags by running peak before bin grouping
-            let normalized: Vec<f32> = mags.iter().map(|&m| m / peak).collect();
-
-            let bars = compute_bars(&normalized);
-
-            if tx.send(bars).is_err() {
+            if tx.send(analyzer.frame(&samples)).is_err() {
                 break;
             }
         }
     });
 }
 
-fn compute_bars(mags: &[f32]) -> Vec<f32> {
-    let log_min = (20.0f32).ln();
-    let log_max = (18000.0f32).ln();
+/// Turns ~33 ms of audio into bar heights (0‥1).
+///
+/// Heights are in decibels, not raw amplitude: music's highs are 30–40 dB
+/// below its bass, so on a linear scale only the lowest bars ever moved.
+/// A tilt of a few dB per octave evens out that natural slope, and the scale
+/// is measured from the loudest recent moment, so a quiet verse sits visibly
+/// lower than the chorus while a quiet song still fills the display after a
+/// few seconds.
+pub struct Analyzer {
+    fft: std::sync::Arc<dyn rustfft::Fft<f32>>,
+    scratch: Vec<Complex<f32>>,
+    hann: Vec<f32>,
+    /// Each bar's FFT bins and its tilt in dB.
+    bands: Vec<(usize, usize, f32)>,
+    /// The loudest recent moment, in dB: rises at once, sinks slowly.
+    ceiling: f32,
+}
 
-    (0..NUM_BARS)
-        .map(|i| {
-            let f_low = (log_min + i as f32 * (log_max - log_min) / NUM_BARS as f32).exp();
-            let f_high =
-                (log_min + (i + 1) as f32 * (log_max - log_min) / NUM_BARS as f32).exp();
+// Tuned on real songs: bars average about half height, and their overall
+// height follows the music's loudness closely.
+/// Bars show this many dB below the ceiling.
+const RANGE_DB: f32 = 42.0;
+/// dB per octave added above 1 kHz (and taken off below).
+const TILT_DB: f32 = 3.0;
+/// How fast the ceiling sinks: 2.4 dB per second at 30 frames a second.
+const SINK_DB: f32 = 0.08;
+/// > 1 spreads loud and quiet further apart.
+const CONTRAST: f32 = 1.6;
+/// The ceiling follows the average of this many loudest bars, not the single
+/// loudest (one spike would push everything else down).
+const TOP: usize = 12;
 
-            let bin_low = ((f_low * FFT_SIZE as f32 / SAMPLE_RATE) as usize).max(1);
-            let bin_high =
-                (((f_high * FFT_SIZE as f32 / SAMPLE_RATE) as usize) + 1).min(mags.len());
+impl Analyzer {
+    pub fn new() -> Self {
+        let fft = FftPlanner::<f32>::new().plan_fft_forward(FFT_SIZE);
+        let scratch = vec![Complex::default(); fft.get_inplace_scratch_len()];
+        let hann = (0..FFT_SIZE)
+            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (FFT_SIZE - 1) as f32).cos()))
+            .collect();
+        let mut a = Analyzer {
+            fft,
+            scratch,
+            hann,
+            bands: Vec::new(),
+            ceiling: SILENCE_DB,
+        };
+        a.set_bands();
+        a
+    }
 
-            let val = if bin_low < bin_high {
-                mags[bin_low..bin_high].iter().copied().fold(0.0f32, f32::max)
-            } else {
-                mags.get(bin_low).copied().unwrap_or(0.0)
-            };
+    fn set_bands(&mut self) {
+        let (log_min, log_max) = (20.0f32.ln(), 18000.0f32.ln());
+        let edge = |i: usize| (log_min + i as f32 * (log_max - log_min) / NUM_BARS as f32).exp();
+        let bin = |f: f32| f * FFT_SIZE as f32 / SAMPLE_RATE;
+        self.bands = (0..NUM_BARS)
+            .map(|i| {
+                let (lo, hi) = (edge(i), edge(i + 1));
+                let first = (bin(lo) as usize).max(1);
+                let end = ((bin(hi) as usize) + 1).min(FFT_SIZE / 2).max(first + 1);
+                let centre = (lo * hi).sqrt();
+                (first, end, TILT_DB * (centre / 1000.0).log2())
+            })
+            .collect();
+    }
 
-            // Soft compression via tanh: maps [0, ∞) → [0, 1)
-            (val * 2.5).tanh()
-        })
-        .collect()
+    pub fn frame(&mut self, samples: &[f32]) -> Vec<f32> {
+        let mut buf: Vec<Complex<f32>> = samples
+            .iter()
+            .zip(&self.hann)
+            .map(|(&s, &w)| Complex { re: s * w, im: 0.0 })
+            .collect();
+        self.fft.process_with_scratch(&mut buf, &mut self.scratch);
+        let scale = FFT_SIZE as f32 / 4.0;
+
+        let db: Vec<f32> = self
+            .bands
+            .iter()
+            .map(|&(first, end, tilt)| {
+                let m = buf[first..end].iter().map(|c| c.norm()).fold(0.0f32, f32::max) / scale;
+                20.0 * m.max(1e-9).log10() + tilt
+            })
+            .collect();
+
+        let mut sorted = db.clone();
+        sorted.sort_by(|a, b| b.total_cmp(a));
+        let loudest = sorted[..TOP].iter().sum::<f32>() / TOP as f32;
+        self.ceiling = loudest.max(self.ceiling - SINK_DB).max(SILENCE_DB);
+        let floor = self.ceiling - RANGE_DB;
+        db.iter()
+            .map(|&d| ((d - floor) / RANGE_DB).clamp(0.0, 1.0).powf(CONTRAST))
+            .collect()
+    }
+}
+
+/// Below this the ceiling doesn't sink, so silence stays flat instead of
+/// the scale chasing the noise floor up.
+const SILENCE_DB: f32 = -50.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn silence_is_flat_and_a_tone_lights_its_own_bar() {
+        let mut a = Analyzer::new();
+        assert!(a.frame(&vec![0.0; FFT_SIZE]).iter().all(|&b| b == 0.0));
+
+        // A 1 kHz tone at a moderate level.
+        let tone: Vec<f32> = (0..FFT_SIZE).map(|i| 0.3 * (2.0 * PI * 1000.0 * i as f32 / SAMPLE_RATE).sin()).collect();
+        let bars = a.frame(&tone);
+        let bin = (1000.0 * FFT_SIZE as f32 / SAMPLE_RATE).round() as usize;
+        let own = a.bands.iter().position(|&(first, end, _)| first <= bin && bin < end).unwrap();
+        assert!(bars[own] > 0.9, "the tone's bar reaches the top");
+        // Bars far from 1 kHz (below ~100 Hz, above ~8 kHz) stay low.
+        assert!(bars[..own / 2].iter().all(|&b| b < 0.2));
+        assert!(bars[NUM_BARS - 20..].iter().all(|&b| b < 0.2));
+    }
 }

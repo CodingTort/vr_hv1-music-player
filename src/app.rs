@@ -2186,8 +2186,11 @@ impl AppState {
             Message::LyricsOffsetReset => self.set_lyrics_offset(0.0),
 
             Message::SpectrumData(bins) => {
+                // Bars jump up with a hit and fall back more slowly, so beats
+                // read clearly without the display flickering.
                 for (a, b) in self.spectrum.iter_mut().zip(bins.iter()) {
-                    *a = *a * 0.55 + b * 0.45;
+                    let k = if b > a { 0.7 } else { 0.25 };
+                    *a += (b - *a) * k;
                 }
                 Task::none()
             }

@@ -7,8 +7,8 @@ use crate::ui::theme;
 struct SpectrumCanvas {
     bins: Vec<f32>,
     accent: Color,
-    /// Output volume (0.0–1.0). Scales bar heights on top of the FFT
-    /// amplitude so the visualizer visibly tracks the volume slider.
+    /// Output volume (0.0–1.0). Bars show the music's own loudness, not the
+    /// slider's (a low volume made them too small to read); muted = flat.
     gain: f32,
     /// Bars grow both up and down from a centre line instead of up from
     /// the bottom.
@@ -29,7 +29,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
         let mut frame = Frame::new(renderer, bounds.size());
 
         let src = &self.bins;
-        if src.is_empty() {
+        if src.is_empty() || self.gain <= 0.0 {
             return vec![frame.into_geometry()];
         }
 
@@ -52,11 +52,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
             }
 
             let x = x_offset + i as f32 * SLOT + (SLOT - BAR_W) / 2.0;
-            // Amplitude follows both the FFT (pitch/frequency content) and
-            // the output volume, so louder = taller bars. A small floor keeps
-            // the spectrum readable when the volume is turned down.
-            let gain = self.gain.max(0.1);
-            let bar_h = (amp * gain).clamp(0.0, 1.0) * bounds.height * 0.88;
+            let bar_h = amp.clamp(0.0, 1.0) * bounds.height * 0.88;
 
             let path = if self.mirrored {
                 // Same overall height, split evenly above and below.
