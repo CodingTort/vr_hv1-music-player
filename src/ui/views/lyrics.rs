@@ -88,7 +88,7 @@ pub fn view(state: &AppState, text_size: f32) -> Element<'_, Message> {
 /// left edge like the sidebar.
 pub fn side_panel(state: &AppState) -> Element<'_, Message> {
     // The gap between the cards is the (invisible) handle.
-    let handle = mouse_area(Space::new(Length::Fixed(8.0), Length::Fill))
+    let handle = mouse_area(Space::new(Length::Fixed(theme::CARD_GAP), Length::Fill))
     .interaction(iced::mouse::Interaction::ResizingHorizontally)
     .on_press(Message::LyricsDragStart);
 

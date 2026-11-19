@@ -384,6 +384,16 @@ pub fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 
 // ── Estilos de Container ──────────────────────────────────────────────────────
 
+/// Gap between the window's cards (and around them).
+pub const CARD_GAP: f32 = 12.0;
+
+/// Padding that keeps a card's contents (row highlights, bars) inside its
+/// rounded corners: iced doesn't clip children to the border radius, and
+/// a 45° point of the curve sits 0.29 × radius in from each edge.
+pub fn card_inset() -> f32 {
+    (corner_radius() * 0.3).ceil()
+}
+
 pub fn card(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(mantle())),
@@ -417,7 +427,7 @@ pub fn sidebar(_: &iced::Theme) -> container::Style {
         border: Border {
             color: surface0(),
             width: 1.0,
-            radius: 0.0.into(),
+            radius: corner_radius().into(),
         },
         ..Default::default()
     }

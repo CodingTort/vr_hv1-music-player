@@ -222,6 +222,7 @@ fn strip_word_stamps(text: &str) -> String {
 #[serde(rename_all = "camelCase", default)]
 struct Record {
     track_name: Option<String>,
+    artist_name: Option<String>,
     duration: Option<f64>,
     instrumental: Option<bool>,
     plain_lyrics: Option<String>,
@@ -268,7 +269,42 @@ async fn fetch_lrclib(q: &Query) -> Result<Option<Record>, String> {
     };
     let candidates: Vec<Record> =
         serde_json::from_str(&body).map_err(|e| format!("unexpected LRCLIB response: {e}"))?;
-    Ok(pick(candidates, secs, &title).map(|r| check_timing(r, secs)))
+    let found = pick(candidates, secs, &title).map(|r| check_timing(r, secs));
+    if found.as_ref().is_some_and(|r| r.synced_lyrics.is_some()) {
+        return Ok(found);
+    }
+
+    // 3. The song's name alone. Covers are often filed only under the
+    //    original artist (Ado's "Overdose" is natori's song). This search
+    //    returns other songs sharing the name, so `pick_by_name` is strict.
+    let japanese = has_japanese(&format!("{} {}", q.title, q.artist));
+    if let Some(body) = lrclib_get("search", &[("track_name", title.as_str())]).await? {
+        let candidates: Vec<Record> =
+            serde_json::from_str(&body).map_err(|e| format!("unexpected LRCLIB response: {e}"))?;
+        if let Some(r) = pick_by_name(candidates, secs, &title, japanese) {
+            return Ok(Some(check_timing(r, secs)));
+        }
+    }
+    Ok(found)
+}
+
+/// For a search by song name alone, which also finds unrelated songs with
+/// the same name: only the exact name, with synced lyrics timed within a few
+/// seconds of the file, and for a Japanese track lyrics in Japanese or in
+/// romaji (an English "Overdose" of the same length is not Ado's).
+fn pick_by_name(candidates: Vec<Record>, secs: f64, title: &str, japanese: bool) -> Option<Record> {
+    let want = normalize(title);
+    let diff = |r: &Record| (r.duration.unwrap_or(f64::MAX) - secs).abs();
+    candidates
+        .into_iter()
+        .filter(|r| {
+            let synced = r.synced_lyrics.as_deref().filter(|s| !s.trim().is_empty());
+            !want.is_empty()
+                && normalize(r.track_name.as_deref().unwrap_or("")) == want
+                && diff(r) <= MAX_DURATION_DIFF
+                && synced.is_some_and(|s| !japanese || has_japanese(s) || parse_lrc(s).is_some_and(|l| lines_look_like_romaji(&l)))
+        })
+        .min_by(|a, b| diff(a).total_cmp(&diff(b)))
 }
 
 /// Drops synced lyrics that run past the end of the track. LRCLIB's stated
@@ -388,12 +424,16 @@ fn search_terms(title: &str, artist: &str) -> (String, String) {
     }
     // "Title feat. Someone" → "Title". The markers are ASCII, so the byte
     // index found is always a char boundary.
-    for marker in [" feat. ", " ft. ", " featuring "] {
+    for marker in [" feat. ", " ft. ", " featuring ", " cover", " covered by "] {
+        // Also drops "Song - Cover" / "Song covered by Someone".
         let hit = song.as_bytes().windows(marker.len()).position(|w| w.eq_ignore_ascii_case(marker.as_bytes()));
         if let Some(i) = hit {
             song = &song[..i];
         }
     }
+    // Cover labels: Ado's 歌いました ("I sang it") and the usual 歌ってみた.
+    let song = song.replace("歌いました", " ").replace("歌ってみた", " ");
+    let song = song.trim().trim_end_matches(['-', '–', '—', '/']).trim();
 
     let song = song.split_whitespace().collect::<Vec<_>>().join(" ");
     if song.is_empty() {
@@ -819,8 +859,46 @@ async fn fetch_japanese(q: &Query) -> Result<Option<Record>, String> {
     let share = |r: &Record| japanese_line_share(r.synced_lyrics.as_deref().or(r.plain_lyrics.as_deref()).unwrap_or(""));
     let japanese: Vec<Record> = candidates.into_iter().filter(|r| share(r) > 0.0).collect();
     let pure: Vec<Record> = japanese.iter().filter(|r| share(r) >= 0.6).cloned().collect();
-    let found = pick(pure, secs, &title).or_else(|| pick(japanese, secs, &title));
-    Ok(found.map(|r| check_timing(r, secs)))
+    if let Some(found) = pick(pure, secs, &title).or_else(|| pick(japanese, secs, &title)) {
+        return Ok(Some(check_timing(found, secs)));
+    }
+    // Covers are often filed only under the original artist: the song's name
+    // alone, keeping only uploads mostly in Japanese script.
+    let Some(body) = lrclib_get("search", &[("track_name", title.as_str())]).await? else {
+        return Ok(None);
+    };
+    let candidates: Vec<Record> =
+        serde_json::from_str(&body).map_err(|e| format!("unexpected LRCLIB response: {e}"))?;
+    let japanese = candidates.iter().filter(|r| share(r) >= 0.6).cloned().collect();
+    if let Some(found) = pick_by_name(japanese, secs, &title, true) {
+        return Ok(Some(check_timing(found, secs)));
+    }
+
+    // Still nothing: the original artist's name, taken from same-name,
+    // same-length uploads in romaji (Ado's "Overdose" → "natori"), finds the
+    // Japanese uploads filed under it.
+    let want = normalize(&title);
+    let mut artists: Vec<String> = Vec::new();
+    for r in &candidates {
+        let romaji = r.synced_lyrics.as_deref().and_then(parse_lrc).is_some_and(|l| lines_look_like_romaji(&l));
+        let same_song = normalize(r.track_name.as_deref().unwrap_or("")) == want
+            && (r.duration.unwrap_or(f64::MAX) - secs).abs() <= MAX_DURATION_DIFF;
+        if let (true, true, Some(artist)) = (romaji, same_song, r.artist_name.as_ref()) {
+            if !artists.contains(artist) {
+                artists.push(artist.clone());
+            }
+        }
+    }
+    for artist in artists.iter().take(2) {
+        let query = format!("{artist} {title}");
+        let Some(body) = lrclib_get("search", &[("q", query.as_str())]).await? else { continue };
+        let more: Vec<Record> = serde_json::from_str(&body).unwrap_or_default();
+        let japanese = more.into_iter().filter(|r| share(r) >= 0.6).collect();
+        if let Some(found) = pick_by_name(japanese, secs, &title, true) {
+            return Ok(Some(check_timing(found, secs)));
+        }
+    }
+    Ok(None)
 }
 
 /// Share of the non-empty lyric lines that contain Japanese script.
@@ -940,6 +1018,14 @@ mod tests {
         assert_eq!(terms("Song Feat. Someone [MV]", "Band - Topic"), pair("Band", "Song"));
         assert_eq!(terms("Song - Live", "Band"), pair("Band", "Song - Live"));
         assert_eq!(terms("【MV】", "X"), pair("X", "【MV】"));
+        // Cover labels (these three songs found no lyrics before).
+        assert_eq!(terms("【Ado】Overdose 歌いました", "Ado"), pair("Ado", "Overdose"));
+        assert_eq!(terms("【Ado】ラブカ？ 歌いました", "Ado"), pair("Ado", "ラブカ？"));
+        assert_eq!(terms("【Ado】罪と罰 歌いました", "Ado"), pair("Ado", "罪と罰"));
+        assert_eq!(terms("Some Song (Cover)", "X"), pair("X", "Some Song"));
+        assert_eq!(terms("Some Song - Cover", "X"), pair("X", "Some Song"));
+        assert_eq!(terms("Some Song covered by Someone", "X"), pair("X", "Some Song"));
+        assert_eq!(terms("ある歌 歌ってみた", "X"), pair("X", "ある歌"));
     }
 
     #[test]
@@ -1014,6 +1100,37 @@ mod tests {
     }
 
     #[test]
+    fn name_only_search_rejects_other_songs_of_the_same_name() {
+        let rec = |name: &str, artist: &str, duration: f64, synced: &str| Record {
+            track_name: Some(name.into()),
+            artist_name: Some(artist.into()),
+            duration: Some(duration),
+            synced_lyrics: Some(synced.into()),
+            plain_lyrics: Some("words".into()),
+            ..Record::default()
+        };
+        let candidates = vec![
+            rec("Some Name", "English Band", 193.0, "[00:01.00]paper boats on the river"), // same length, wrong song
+            rec("Other Name", "Someone", 194.0, "[00:01.00]夜空に星が光る"),              // wrong name
+            rec("Some Name", "Original", 194.0, "[00:01.00]夜空に星が光る"),              // the one
+            rec("Some Name", "Original", 230.0, "[00:01.00]夜空に星が光る"),              // other cut
+        ];
+        let picked = pick_by_name(candidates.clone(), 193.2, "Some Name", true).unwrap();
+        assert_eq!(picked.duration, Some(194.0));
+        assert!(picked.synced_lyrics.unwrap().contains('夜'));
+        // Romaji counts as Japanese; English of the same length still doesn't.
+        let romaji = rec("Some Name", "Original", 193.5,
+            "[00:01.00]yozora ni hikaru hoshi o miageta\n[00:04.00]kimi no koe ga mada kikoeru\n\
+             [00:07.00]tooi michi wo hashitte kita\n[00:10.00]shinpai shinaide matteru yo");
+        let with_romaji = vec![candidates[0].clone(), romaji];
+        assert_eq!(pick_by_name(with_romaji, 193.2, "Some Name", true).unwrap().duration, Some(193.5));
+        // For a non-Japanese track the language isn't constrained.
+        assert_eq!(pick_by_name(candidates.clone(), 193.2, "Some Name", false).unwrap().duration, Some(193.0));
+        // Nothing within the length tolerance: nothing at all.
+        assert!(pick_by_name(candidates, 150.0, "Some Name", true).is_none());
+    }
+
+    #[test]
     fn drops_synced_lines_timed_past_the_end() {
         let rec = || Record {
             synced_lyrics: Some("[00:10.00]a\n[03:58.59]b".into()),
@@ -1030,6 +1147,7 @@ mod tests {
     fn rec(name: &str, duration: f64, synced: bool) -> Record {
         Record {
             track_name: Some(name.into()),
+            artist_name: None,
             duration: Some(duration),
             instrumental: Some(false),
             plain_lyrics: Some("words".into()),

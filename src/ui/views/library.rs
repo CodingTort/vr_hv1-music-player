@@ -19,13 +19,14 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 
     // The gap between the cards is the handle: invisible, but it shows the
     // resize cursor and can be dragged.
-    let drag_handle = mouse_area(Space::new(Length::Fixed(8.0), Length::Fill))
+    let drag_handle = mouse_area(Space::new(Length::Fixed(theme::CARD_GAP), Length::Fill))
         .interaction(iced::mouse::Interaction::ResizingHorizontally)
         .on_press(Message::SidebarDragStart);
 
     // The track list is a card like the sidebar and the lyrics panel.
     let card = if state.glass_surfaces() { theme::sidebar_glass } else { theme::sidebar };
     let track_list = container(track_list_view(state))
+        .padding(theme::card_inset())
         .style(card)
         .width(Length::Fill)
         .height(Length::Fill);
@@ -139,6 +140,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
 
     let sidebar_style = if state.glass_surfaces() { theme::sidebar_glass } else { theme::sidebar };
     container(sidebar_body)
+        .padding(theme::card_inset())
         .style(sidebar_style)
         .width(Length::Fixed(state.sidebar_width))
         .height(Length::Fill)
@@ -365,19 +367,12 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
 
     let scroll_h = (state.playlist_height - 30.0).max(0.0);
 
+    // No box of its own: the hairline above separates it, and a square
+    // border here would cover the card's rounded corners.
     container(
         column![tab_row, scrollable(list).height(Length::Fixed(scroll_h))]
             .spacing(0),
     )
-    .style(|_| iced::widget::container::Style {
-        background: Some(iced::Background::Color(theme::with_alpha(theme::mantle(), 0.6))),
-        border: iced::Border {
-            color: theme::surface0(),
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    })
     .height(Length::Fixed(state.playlist_height))
     .width(Length::Fill)
     .into()
@@ -553,10 +548,6 @@ fn build_column_header(
         .align_y(Alignment::Center);
 
     container(header_row)
-        .style(|_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(theme::mantle())),
-            ..Default::default()
-        })
         .padding([0, 12])
         .width(Length::Fill)
         .into()
@@ -608,7 +599,7 @@ fn toolbar_view(state: &AppState) -> Element<'_, Message> {
         Space::with_width(0).into()
     };
 
-    container(
+    let bar = container(
         row![
             search_input,
             Space::with_width(8),
@@ -630,17 +621,16 @@ fn toolbar_view(state: &AppState) -> Element<'_, Message> {
         // squeezing the labels into vertical letters.
         .wrap(),
     )
-    .style(|_| iced::widget::container::Style {
-        background: Some(iced::Background::Color(theme::with_alpha(theme::mantle(), 0.7))),
-        border: iced::Border {
-            color: theme::surface0(),
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    })
-    .width(Length::Fill)
-    .into()
+    .width(Length::Fill);
+    // A hairline underneath rather than a square bordered box, which would
+    // cover the card's rounded corners.
+    let hairline = container(Space::new(Length::Fill, Length::Fixed(1.0))).style(|_| {
+        iced::widget::container::Style {
+            background: Some(iced::Background::Color(theme::surface0())),
+            ..Default::default()
+        }
+    });
+    column![bar, container(hairline).padding([0, 8])].into()
 }
 
 fn build_track_row(
