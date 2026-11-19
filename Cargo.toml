@@ -7,6 +7,9 @@ edition = "2021"
 # GUI
 iced = { version = "0.13", features = ["image", "canvas", "tokio"] }
 
+# Native file picker (background image)
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+
 # Áudio — decode
 symphonia = { version = "0.5", features = ["all"] }
 

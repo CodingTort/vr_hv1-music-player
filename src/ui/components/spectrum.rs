@@ -7,6 +7,9 @@ use crate::ui::theme;
 struct SpectrumCanvas {
     bins: Vec<f32>,
     accent: Color,
+    /// Output volume (0.0–1.0). Scales bar heights on top of the FFT
+    /// amplitude so the visualizer visibly tracks the volume slider.
+    gain: f32,
 }
 
 impl canvas::Program<Message> for SpectrumCanvas {
@@ -32,9 +35,9 @@ impl canvas::Program<Message> for SpectrumCanvas {
         const SLOT: f32 = BAR_W + GAP;
 
         let n_bars = ((bounds.width / SLOT).floor() as usize).clamp(1, src.len());
-        let center_y = bounds.height / 2.0;
         let x_offset = (bounds.width - n_bars as f32 * SLOT) / 2.0;
 
+        let bottom_y = bounds.height;
         for i in 0..n_bars {
             // Evenly resample src into n_bars
             let src_idx = i * src.len() / n_bars;
@@ -45,11 +48,15 @@ impl canvas::Program<Message> for SpectrumCanvas {
             }
 
             let x = x_offset + i as f32 * SLOT + (SLOT - BAR_W) / 2.0;
-            let half_h = amp * center_y * 0.88;
+            // Amplitude follows both the FFT (pitch/frequency content) and
+            // the output volume, so louder = taller bars. A small floor keeps
+            // the spectrum readable when the volume is turned down.
+            let gain = self.gain.max(0.1);
+            let bar_h = (amp * gain).clamp(0.0, 1.0) * bounds.height * 0.88;
 
             let path = Path::rectangle(
-                Point::new(x, center_y - half_h),
-                Size::new(BAR_W, half_h * 2.0),
+                Point::new(x, bottom_y - bar_h),
+                Size::new(BAR_W, bar_h),
             );
             frame.fill(&path, self.accent);
         }
@@ -58,10 +65,16 @@ impl canvas::Program<Message> for SpectrumCanvas {
     }
 }
 
-pub fn spectrum_view(bins: &[f32], width: Length, height: Length) -> Element<'_, Message> {
+pub fn spectrum_view(
+    bins: &[f32],
+    gain: f32,
+    width: Length,
+    height: Length,
+) -> Element<'_, Message> {
     Canvas::new(SpectrumCanvas {
         bins: bins.to_vec(),
         accent: theme::accent(),
+        gain: gain.clamp(0.0, 1.0),
     })
     .width(width)
     .height(height)

@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct Config {
     pub music_dir: String, // String para suportar "~" antes de expandir
@@ -21,6 +21,17 @@ pub struct Config {
     pub yt_dlp_quality: String,
     pub yt_dlp_output: String,
     pub yt_search_results: usize,
+    // Theme / UI
+    pub theme_mode: String, // "auto" | "manual"
+    pub theme_preset: String,
+    pub use_glassmorphism: bool,
+    pub corner_radius: f32,
+    pub background_kind: String,
+    pub background_color: String,
+    pub background_gradient_from: String,
+    pub background_gradient_to: String,
+    pub background_gradient_angle: f32,
+    pub background_image: String, // empty = none
 }
 
 impl Default for Config {
@@ -38,6 +49,16 @@ impl Default for Config {
             yt_dlp_quality: "128K".into(),
             yt_dlp_output: "%(title)s.%(ext)s".into(),
             yt_search_results: 15,
+            theme_mode: "auto".into(),
+            theme_preset: "lavender".into(),
+            use_glassmorphism: true,
+            corner_radius: 10.0,
+            background_kind: "none".into(),
+            background_color: "#11111b".into(),
+            background_gradient_from: "#1e1b2e".into(),
+            background_gradient_to: "#0f0e17".into(),
+            background_gradient_angle: 135.0,
+            background_image: String::new(),
         }
     }
 }
@@ -88,11 +109,11 @@ fn read_or_default() -> Config {
     }
 }
 
-fn config_path() -> PathBuf {
+pub fn config_path() -> PathBuf {
     expand_tilde("~/.config/lavanda/config.toml")
 }
 
-fn expand_tilde(path: &str) -> PathBuf {
+pub fn expand_tilde(path: &str) -> PathBuf {
     if path.starts_with("~/") {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         PathBuf::from(home).join(&path[2..])
@@ -103,50 +124,4 @@ fn expand_tilde(path: &str) -> PathBuf {
 
 // ── Config padrão gerada na primeira execução ─────────────────────────────────
 
-const DEFAULT_CONFIG: &str = r#"# lavanda — configuration file
-# ~/.config/lavanda/config.toml
-#
-# All fields are optional. Missing fields use the defaults shown here.
-
-# Path to your music library. Scanned on launch and browsed by artist/album/genre.
-music_dir = "~/Music"
-
-# Initial volume (0.0 = mute, 1.0 = 100%)
-volume = 0.8
-
-# Start the session with shuffle enabled
-shuffle = false
-
-# Start the session with repeat enabled
-repeat = false
-
-# Interface language. Options: "auto", "en", "pt_BR", "es"
-# "auto" detects from $LANG
-language = "auto"
-
-# Seek step in seconds for the ← → arrow keys
-seek_step = 5
-
-# Volume delta per + / - keypress
-volume_step = 0.05
-
-# ── YouTube search & download (press Y in the library) ────────────────────────
-# Requires yt-dlp:  sudo pacman -S yt-dlp   (and ffmpeg for audio conversion)
-
-# Path to the yt-dlp executable
-yt_dlp_path = "yt-dlp"
-
-# Audio container for downloads (mp3, opus, flac, m4a…)
-yt_dlp_format = "mp3"
-
-# Audio bitrate, e.g. 128K or 192K
-yt_dlp_quality = "128K"
-
-# Filename template, relative to music_dir. These are yt-dlp output fields.
-# %(title)s and %(uploader)s both work. lavanda reads the embedded tags, not
-# the filename, so this only affects how files look in your file manager.
-yt_dlp_output = "%(title)s.%(ext)s"
-
-# How many results to fetch per search
-yt_search_results = 15
-"#;
+const DEFAULT_CONFIG: &str = "# lavanda - configuration file\n# ~/.config/lavanda/config.toml\n\nmusic_dir = \"~/Music\"\nvolume = 0.8\nshuffle = false\nrepeat = false\nlanguage = \"auto\"\nseek_step = 5\nvolume_step = 0.05\nyt_dlp_path = \"yt-dlp\"\nyt_dlp_format = \"mp3\"\nyt_dlp_quality = \"128K\"\nyt_dlp_output = \"%(title)s.%(ext)s\"\nyt_search_results = 15\ntheme_mode = \"auto\"\ntheme_preset = \"lavender\"\nuse_glassmorphism = true\ncorner_radius = 10.0\nbackground_kind = \"none\"\nbackground_color = \"#11111b\"\nbackground_gradient_from = \"#1e1b2e\"\nbackground_gradient_to = \"#0f0e17\"\nbackground_gradient_angle = 135.0\nbackground_image = \"\"\n";

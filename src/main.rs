@@ -58,7 +58,9 @@ fn main() -> iced::Result {
 
     config::load();
     locale::load();
-    ui::theme::load_system_theme();
+    let cfg = config::get();
+    ui::theme::reload_with_mode(&cfg.theme_mode, &cfg.theme_preset);
+    ui::theme::set_corner_radius(cfg.corner_radius);
     persist::init();
     app::run()
 }

@@ -108,9 +108,21 @@ seek_step = 5
 
 # Volume delta per + / - keypress
 volume_step = 0.05
+
+# Theme: "auto" follows the live Omarchy theme, "manual" uses a built-in preset
+theme_mode = "auto"
+# Built-in presets: "lavender", "vampire", "cotton candy", "catppuccin mocha", "tokyo night"
+theme_preset = "lavender"
+
+# Optional background image (empty = none). Supports "~" expansion.
+background_image = ""
+# Translucent "glass" panels. A background image forces this on.
+use_glassmorphism = true
 ```
 
 Volume is restored on next launch via `~/.config/lavanda/state.toml`. Library data — liked songs, play counts, playlists, recently played and column layout — is persisted to `~/.config/lavanda/db.json`.
+
+The same options are editable from the in-app **Settings** dialog (gear icon in the header, or `Ctrl+,`), which includes a native file picker for the background image.
 
 ---
 
@@ -147,6 +159,8 @@ lavanda reads the active Omarchy theme from `~/.config/omarchy/current/theme.nam
 | `color15` | subtext |
 
 Works with all built-in Omarchy themes (Catppuccin, Nord, Gruvbox, Tokyo Night, Rosé Pinè, etc.) and custom user themes in `~/.config/omarchy/themes/`.
+
+If you'd rather not follow the desktop theme, set `theme_mode = "manual"` (or pick it in the Settings dialog) and choose one of the bundled presets — `lavender`, `vampire`, `cotton candy`, `catppuccin mocha`, `tokyo night`. Manual mode ignores the live Omarchy theme.
 
 ### Waybar integration
 
@@ -204,6 +218,7 @@ These work when the lavanda window is focused.
 | `v` | toggle spectrum visualizer |
 | `F5` | rescan the library |
 | `?` or `Ctrl+K` | keybinding reference |
+| `Ctrl+,` | open settings (theme, background image, glassmorphism) |
 | `Escape` | close any overlay |
 
 Mouse: double-click a track to play it; right-click a track, artist, album or column header for context actions; `Ctrl+Click` / `Shift+Click` to multi-select.

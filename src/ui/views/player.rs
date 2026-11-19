@@ -113,6 +113,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             .push(Space::with_width(16))
             .push(spectrum::spectrum_view(
                 &state.spectrum,
+                state.volume,
                 Length::FillPortion(3),
                 Length::Fixed(180.0),
             ));
@@ -125,8 +126,9 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         .align_y(Alignment::Center)
         .padding(16);
 
+    let panel_style = if state.glass_surfaces() { theme::player_panel_glass } else { theme::player_panel };
     container(player_row)
-        .style(theme::player_panel)
+        .style(panel_style)
         .width(Length::Fill)
         .into()
 }

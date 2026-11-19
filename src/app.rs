@@ -278,6 +278,22 @@ pub enum Message {
 
     // Open local folder
     OpenLocalFolder(PathBuf),
+    // Settings
+    OpenSettings,
+    CloseSettings,
+    SettingsThemeModeChanged(String),
+    SettingsThemePresetChanged(String),
+    SettingsCornerRadiusChanged(f32),
+    SettingsGlassmorphismToggled(bool),
+    SettingsBackgroundKindChanged(String),
+    SettingsBackgroundColorChanged(String),
+    SettingsBackgroundGradientFromChanged(String),
+    SettingsBackgroundGradientToChanged(String),
+    SettingsBackgroundGradientAngleChanged(f32),
+    SettingsBackgroundImageChanged(String),
+    SettingsSelectBackgroundImage,
+    SettingsBackgroundImageSelected(Option<std::path::PathBuf>),
+    SettingsApply,
 }
 
 // ── Estado global ─────────────────────────────────────────────────────────────
@@ -371,6 +387,17 @@ pub struct AppState {
     // Tema
     pub iced_theme: Theme,
     loaded_theme_name: String,
+    pub theme_mode: String,
+    pub theme_preset: String,
+    pub use_glassmorphism: bool,
+    pub corner_radius: f32,
+    pub background_kind: String,
+    pub background_color: String,
+    pub background_gradient_from: String,
+    pub background_gradient_to: String,
+    pub background_gradient_angle: f32,
+    pub background_image: Option<String>,
+    pub show_settings: bool,
 
     // i18n
     pub strings: &'static crate::locale::Strings,
@@ -470,6 +497,20 @@ impl AppState {
             show_spectrum: true,
             iced_theme,
             loaded_theme_name,
+            theme_mode: cfg.theme_mode.clone(),
+            theme_preset: cfg.theme_preset.clone(),
+            use_glassmorphism: cfg.use_glassmorphism,
+            corner_radius: cfg.corner_radius,
+            background_kind: cfg.background_kind.clone(),
+            background_color: cfg.background_color.clone(),
+            background_gradient_from: cfg.background_gradient_from.clone(),
+            background_gradient_to: cfg.background_gradient_to.clone(),
+            background_gradient_angle: cfg.background_gradient_angle,
+            background_image: {
+                let b = cfg.background_image.trim();
+                if b.is_empty() { None } else { Some(b.to_string()) }
+            },
+            show_settings: false,
             strings: crate::locale::get(),
             audio,
             audio_events,
@@ -485,6 +526,27 @@ impl AppState {
         crate::state::save(&crate::state::SavedState {
             volume: Some(self.volume),
         });
+    }
+
+    /// True when panels should use translucent "glass" surfaces. A custom
+    /// background image forces this on so the image stays visible.
+    pub fn glass_surfaces(&self) -> bool {
+        self.use_glassmorphism || self.background_image.is_some()
+    }
+
+    fn persist_config(&self) {
+        let mut cfg = crate::config::get().clone();
+        cfg.theme_mode = self.theme_mode.clone();
+        cfg.theme_preset = self.theme_preset.clone();
+        cfg.use_glassmorphism = self.use_glassmorphism;
+        cfg.corner_radius = self.corner_radius;
+        cfg.background_kind = self.background_kind.clone();
+        cfg.background_color = self.background_color.clone();
+        cfg.background_gradient_from = self.background_gradient_from.clone();
+        cfg.background_gradient_to = self.background_gradient_to.clone();
+        cfg.background_gradient_angle = self.background_gradient_angle;
+        cfg.background_image = self.background_image.clone().unwrap_or_default();
+        let _ = crate::persist::save_config(&cfg);
     }
 
     fn send_mpris(&self, update: MprisUpdate) {
@@ -1612,11 +1674,13 @@ impl AppState {
                 let has_playlist_dialog = self.playlist_dialog.is_some();
                 let has_yt_dialog = self.yt_dialog.is_some();
                 let has_shortcuts = self.show_shortcuts;
+                let has_settings = self.show_settings;
                 let has_context_menu = self.show_context_menu.is_some();
                 let ctrl = self.modifiers.control() || self.modifiers.command();
 
                 match key {
                     Key::Named(Named::Escape) => {
+                        if has_settings { return Task::done(Message::CloseSettings); }
                         if has_yt_dialog { return Task::done(Message::CloseYtSearch); }
                         if has_shortcuts { return Task::done(Message::CloseShortcuts); }
                         if has_playlist_dialog { return Task::done(Message::ClosePlaylistDialog); }
@@ -1674,12 +1738,15 @@ impl AppState {
                                 Task::done(Message::OpenShortcuts)
                             };
                         }
+                        if c.as_str() == "," {
+                            return Task::done(Message::OpenSettings);
+                        }
                     }
-                    // While the YouTube dialog is open, printable characters
-                    // belong to the query box, so library shortcuts must not fire.
+                    // While a text-entry dialog is open, printable characters
+                    // belong to its inputs, so library shortcuts must not fire.
                     // Returning from the whole arm would swallow these keys from
                     // the text input, so just fall through to no-op.
-                    Key::Character(ref _c) if has_yt_dialog => {}
+                    Key::Character(ref _c) if has_yt_dialog || has_settings => {}
                     Key::Character(ref c) if !has_playlist_dialog && !has_tag_editor => {
                         match c.as_str() {
                             "n" | "N" => return Task::done(Message::NextTrack),
@@ -1711,10 +1778,93 @@ impl AppState {
                 self.show_context_menu = None;
                 if let Some(parent) = path.parent() {
                     let folder = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
-                    for fm in &["nautilus", "thunar", "dolphin", "nemo", "pcmanfm"] {
+                    for fm in &["nautilus", "thunar", "dolphin", "nemo", "pcmanfm-qt", "pcmanfm"] {
                         if std::process::Command::new(fm).arg(&folder).spawn().is_ok() { break; }
                     }
                 }
+                Task::none()
+            }
+
+            Message::OpenSettings => {
+                self.show_settings = true;
+                Task::none()
+            }
+            Message::CloseSettings => {
+                // Settings preview live, so closing keeps the current choices
+                // (instead of silently reverting them).
+                self.persist_config();
+                self.show_settings = false;
+                Task::none()
+            }
+            Message::SettingsThemeModeChanged(mode) => {
+                self.theme_mode = mode;
+                // Live preview while the settings dialog is open.
+                crate::ui::theme::reload_with_mode(&self.theme_mode, &self.theme_preset);
+                self.iced_theme = build_iced_theme();
+                Task::none()
+            }
+            Message::SettingsThemePresetChanged(preset) => {
+                self.theme_preset = preset;
+                crate::ui::theme::reload_with_mode(&self.theme_mode, &self.theme_preset);
+                self.iced_theme = build_iced_theme();
+                Task::none()
+            }
+            Message::SettingsGlassmorphismToggled(v) => {
+                self.use_glassmorphism = v;
+                Task::none()
+            }
+            Message::SettingsCornerRadiusChanged(v) => {
+                self.corner_radius = v.clamp(4.0, 20.0);
+                crate::ui::theme::set_corner_radius(self.corner_radius);
+                Task::none()
+            }
+            Message::SettingsBackgroundKindChanged(k) => {
+                self.background_kind = k.to_lowercase();
+                Task::none()
+            }
+            Message::SettingsBackgroundColorChanged(c) => {
+                self.background_color = c;
+                Task::none()
+            }
+            Message::SettingsBackgroundGradientFromChanged(c) => {
+                self.background_gradient_from = c;
+                Task::none()
+            }
+            Message::SettingsBackgroundGradientToChanged(c) => {
+                self.background_gradient_to = c;
+                Task::none()
+            }
+            Message::SettingsBackgroundGradientAngleChanged(a) => {
+                self.background_gradient_angle = a;
+                Task::none()
+            }
+            Message::SettingsBackgroundImageChanged(p) => {
+                // Store as-is; may need to expand ~ later
+                self.background_image = if p.trim().is_empty() { None } else { Some(p) };
+                Task::none()
+            }
+            Message::SettingsSelectBackgroundImage => Task::perform(
+                async {
+                    let handle = rfd::AsyncFileDialog::new()
+                        .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
+                        .pick_file()
+                        .await;
+                    handle.map(|h| h.path().to_path_buf())
+                },
+                Message::SettingsBackgroundImageSelected,
+            ),
+            Message::SettingsBackgroundImageSelected(path) => {
+                if let Some(p) = path {
+                    self.background_image = Some(p.to_string_lossy().to_string());
+                }
+                Task::none()
+            }
+            Message::SettingsApply => {
+                crate::ui::theme::reload_with_mode(&self.theme_mode, &self.theme_preset);
+                self.iced_theme = build_iced_theme();
+                self.loaded_theme_name = crate::ui::theme::read_current_theme_name();
+                self.persist_config();
+                self.show_settings = false;
                 Task::none()
             }
 
@@ -1806,11 +1956,15 @@ impl AppState {
             },
 
             Message::CheckTheme => {
-                let current = crate::ui::theme::read_current_theme_name();
-                if !current.is_empty() && current != self.loaded_theme_name {
-                    crate::ui::theme::reload_system_theme();
-                    self.iced_theme = build_iced_theme();
-                    self.loaded_theme_name = current;
+                // Only follow the live Omarchy/desktop theme when in "auto"
+                // mode. Manual mode keeps the user's chosen preset.
+                if self.theme_mode.eq_ignore_ascii_case("auto") {
+                    let current = crate::ui::theme::read_current_theme_name();
+                    if !current.is_empty() && current != self.loaded_theme_name {
+                        crate::ui::theme::reload_system_theme();
+                        self.iced_theme = build_iced_theme();
+                        self.loaded_theme_name = current;
+                    }
                 }
                 Task::none()
             }
@@ -1833,18 +1987,78 @@ impl AppState {
                 .width(Length::Fill)
                 .height(Length::Fill);
 
+                let bg_style: Box<dyn Fn(&Theme) -> iced::widget::container::Style> = if self.glass_surfaces() {
+                    Box::new(theme::base_style_glass)
+                } else {
+                    match self.background_kind.as_str() {
+                        "color" => {
+                            if let Some(c) = theme::parse_color_str(&self.background_color) {
+                                Box::new(theme::base_style_solid(c))
+                            } else {
+                                Box::new(|_: &Theme| iced::widget::container::Style {
+                                    background: Some(iced::Background::Color(theme::base())),
+                                    ..Default::default()
+                                })
+                            }
+                        }
+                        "gradient" => {
+                            let from = theme::parse_color_str(&self.background_gradient_from).unwrap_or(theme::base());
+                            let to = theme::parse_color_str(&self.background_gradient_to).unwrap_or(theme::mantle());
+                            Box::new(theme::base_style_gradient(from, to, self.background_gradient_angle))
+                        }
+                        _ => {
+                            Box::new(|_: &Theme| iced::widget::container::Style {
+                                background: Some(iced::Background::Color(theme::base())),
+                                ..Default::default()
+                            })
+                        }
+                    }
+                };
                 container(main_col)
-                    .style(|_: &Theme| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(theme::base())),
-                        ..Default::default()
-                    })
+                    .style(move |theme: &Theme| bg_style(theme))
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .into()
             }
         };
 
-        let mut view_stack = stack![main];
+        let mut view_stack: iced::widget::Stack<'_, Message> = match self.background_kind.as_str() {
+            "image" => {
+                let path = self.background_image.as_deref().unwrap_or("");
+                if !path.trim().is_empty() {
+                    let expanded = crate::config::expand_tilde(path);
+                    let handle = iced::widget::image::Handle::from_path(expanded);
+                    let bg: Element<Message> = iced::widget::image(handle)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .content_fit(iced::ContentFit::Cover)
+                        .into();
+                    stack![bg, main]
+                } else {
+                    stack![main]
+                }
+            }
+            "album" => {
+                // try to get cover from current track; if missing, fall back to main
+                if let Some(track) = &self.current_track {
+                    if let Some(ref cover) = track.cover_data {
+                        let handle = iced::widget::image::Handle::from_bytes(cover.clone());
+                        let bg: Element<Message> = iced::widget::image(handle)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .content_fit(iced::ContentFit::Cover)
+                            .opacity(0.6_f32)
+                            .into();
+                        stack![bg, main]
+                    } else {
+                        stack![main]
+                    }
+                } else {
+                    stack![main]
+                }
+            }
+            _ => stack![main],
+        };
 
         // Tag editor overlay
         if let Some(ref editor_state) = self.show_tag_editor {
@@ -1871,10 +2085,38 @@ impl AppState {
             view_stack = view_stack.push(self.context_menu_view(target));
         }
 
+        // Settings overlay
+        if self.show_settings {
+            view_stack = view_stack.push(crate::ui::components::settings::view(
+                &self.theme_mode,
+                &self.theme_preset,
+                self.use_glassmorphism,
+                &self.background_kind,
+                &self.background_color,
+                &self.background_gradient_from,
+                &self.background_gradient_to,
+                self.background_gradient_angle,
+                self.background_image.as_deref().unwrap_or(""),
+                self.corner_radius,
+            ));
+        }
+
         view_stack.into()
     }
 
     fn header_view(&self) -> Element<'_, Message> {
+        use iced::widget::button;
+        let settings_btn = button(
+            text(crate::ui::icons::ICON_SETTINGS)
+                .font(crate::ui::icons::NERD_FONT_MONO)
+                .color(theme::text())
+                .size(24),
+        )
+        .on_press(Message::OpenSettings)
+        .style(iced::widget::button::text)
+        .padding([0, 4]);
+
+        let header_style = if self.glass_surfaces() { theme::header_glass } else { theme::header };
         container(
             row![
                 text(crate::ui::icons::ICON_MUSIC)
@@ -1887,10 +2129,11 @@ impl AppState {
                     .size(16)
                     .font(crate::ui::icons::UI_FONT_BOLD),
                 Space::with_width(Length::Fill),
+                settings_btn,
             ]
             .align_y(Alignment::Center),
         )
-        .style(theme::header)
+        .style(header_style)
         .width(Length::Fill)
         .padding([0, 16])
         .into()
@@ -1930,6 +2173,7 @@ impl AppState {
             row_item("Y", "Search YouTube & download"),
             row_item("F5", "Rescan library"),
             row_item("+ / -", "Volume up / down"),
+            row_item("Ctrl+,", "Open settings"),
             row_item("?", "This help"),
         ]
         .spacing(8).padding(24);

@@ -131,6 +131,15 @@ fn db() -> &'static Mutex<Db> {
     DB.get_or_init(|| Mutex::new(Db::load()))
 }
 
+pub fn save_config(cfg: &crate::config::Config) -> std::io::Result<()> {
+    let path = crate::config::config_path();
+    let toml_str = toml::to_string_pretty(cfg).unwrap_or_default();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, toml_str)
+}
+
 pub fn init() {
     let _ = db();
 }

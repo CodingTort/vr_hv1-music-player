@@ -109,6 +109,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             .push(
                 container(spectrum::spectrum_view(
                     &state.spectrum,
+                    state.volume,
                     Length::Fixed(320.0),
                     Length::Fixed(80.0),
                 ))
@@ -118,11 +119,16 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 
     layout = layout.push(Space::with_height(Length::Fill));
 
-    container(layout)
-        .style(|_: &iced::Theme| iced::widget::container::Style {
+    let bg_style = if state.glass_surfaces() {
+        theme::base_style_glass
+    } else {
+        |_: &iced::Theme| iced::widget::container::Style {
             background: Some(iced::Background::Color(theme::base())),
             ..Default::default()
-        })
+        }
+    };
+    container(layout)
+        .style(bg_style)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

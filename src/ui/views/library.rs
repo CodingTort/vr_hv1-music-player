@@ -132,8 +132,9 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
     ]
     .spacing(0);
 
+    let sidebar_style = if state.glass_surfaces() { theme::sidebar_glass } else { theme::sidebar };
     container(sidebar_body)
-        .style(theme::sidebar)
+        .style(sidebar_style)
         .width(Length::Fixed(state.sidebar_width))
         .height(Length::Fill)
         .into()
