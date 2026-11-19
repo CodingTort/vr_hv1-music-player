@@ -585,10 +585,32 @@ fn is_romaji_word(word: &str) -> bool {
 pub async fn romanize(lines: Vec<LyricLine>) -> Result<Vec<LyricLine>, String> {
     use tokio::io::AsyncWriteExt;
 
+    // With MeCab, kanji are turned into kana by it (it reads them in
+    // context) and the words are already spaced; kakasi then only has kana,
+    // which it romanises without guessing. Each space-separated part goes
+    // through MeCab on its own, as it drops spaces.
+    let parts: Vec<Vec<&str>> = lines.iter().map(|l| l.text.split(' ').collect()).collect();
+    let flat: Vec<&str> = parts.iter().flatten().copied().collect();
+    let (texts, spaced): (Vec<String>, bool) = match mecab(&flat).await {
+        Some(words) => {
+            let mut kana = words.iter().map(|w| mecab_kana(w));
+            let texts = parts
+                .iter()
+                .map(|p| p.iter().map(|_| kana.next().unwrap_or_default()).collect::<Vec<_>>().join(" "))
+                .collect();
+            (texts, true)
+        }
+        None => (lines.iter().map(|l| l.text.clone()).collect(), false),
+    };
+
+    // Kanji, hiragana, katakana and full-width symbols to ASCII, with
+    // spaces between words (unless MeCab spaced them already).
+    let mut args = vec!["-iutf8", "-outf8", "-Ja", "-Ha", "-Ka", "-Ea"];
+    if !spaced {
+        args.push("-s");
+    }
     let mut child = tokio::process::Command::new("kakasi")
-        // Kanji, hiragana, katakana and full-width symbols to ASCII, with
-        // spaces between words.
-        .args(["-iutf8", "-outf8", "-Ja", "-Ha", "-Ka", "-Ea", "-s"])
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -601,7 +623,7 @@ pub async fn romanize(lines: Vec<LyricLine>) -> Result<Vec<LyricLine>, String> {
             _ => format!("could not run kakasi: {e}"),
         })?;
 
-    let input = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n") + "\n";
+    let input = texts.join("\n") + "\n";
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(input.as_bytes()).await.map_err(|e| format!("kakasi: {e}"))?;
     } // dropped here: kakasi sees end of input
@@ -646,14 +668,54 @@ pub fn wants_furigana(lines: &[LyricLine]) -> bool {
 /// a single plain piece when its reading can't be lined up with the text:
 /// the Japanese itself is never changed, at worst a reading is missing.
 pub async fn furigana(lines: Vec<String>) -> Result<Vec<Vec<Ruby>>, String> {
+    // Neither tool keeps the lyrics' own spaces, so each space-separated part
+    // is analysed on its own, and the parts are joined back with spaces.
+    let parts: Vec<Vec<&str>> = lines.iter().map(|l| l.split(' ').collect()).collect();
+    let flat: Vec<&str> = parts.iter().flatten().copied().collect();
+
+    // MeCab understands grammar (愛して is the verb 愛する, 天の川 one word
+    // read あまのがわ); kakasi only matches dictionary entries, and gets such
+    // words wrong, so it is the fallback when MeCab isn't installed.
+    let analysed = match mecab(&flat).await {
+        Some(words) => words
+            .into_iter()
+            .map(|part| {
+                part.into_iter()
+                    .flat_map(|w| match w.reading {
+                        Some(r) if w.surface.chars().any(is_kanji) => align(&w.surface, &r),
+                        _ => vec![Ruby { text: w.surface, reading: None }],
+                    })
+                    .collect()
+            })
+            .collect(),
+        None => kakasi_furigana(&flat).await?,
+    };
+    let mut analysed = analysed.into_iter();
+
+    Ok(lines
+        .iter()
+        .zip(&parts)
+        .map(|(line, line_parts)| {
+            let mut pieces: Vec<Ruby> = Vec::new();
+            for i in 0..line_parts.len() {
+                if i > 0 {
+                    pieces.push(Ruby { text: " ".into(), reading: None });
+                }
+                pieces.extend(analysed.next().unwrap_or_default());
+            }
+            // Anything lost or changed on the way: no furigana for this line
+            // rather than misplaced ones.
+            let rebuilt: String = pieces.iter().map(|p| p.text.as_str()).collect();
+            if rebuilt == *line { merge_plain(pieces) } else { vec![Ruby { text: line.clone(), reading: None }] }
+        })
+        .collect())
+}
+
+/// kakasi's furigana for each part (no spaces inside).
+async fn kakasi_furigana(parts: &[&str]) -> Result<Vec<Vec<Ruby>>, String> {
     use tokio::io::AsyncWriteExt;
 
-    // kakasi puts spaces between words (-s), so the lyrics' own spaces can't
-    // go through it: each space-separated part goes in as its own line, and
-    // the parts are joined back with spaces.
-    let parts: Vec<Vec<&str>> = lines.iter().map(|l| l.split(' ').collect()).collect();
-    let input = parts.iter().flatten().copied().collect::<Vec<_>>().join("\n") + "\n";
-
+    let input = parts.join("\n") + "\n";
     let mut child = tokio::process::Command::new("kakasi")
         .args(["-iutf8", "-outf8", "-JH", "-f", "-s"])
         .stdin(Stdio::piped())
@@ -668,23 +730,99 @@ pub async fn furigana(lines: Vec<String>) -> Result<Vec<Vec<Ruby>>, String> {
     let out = child.wait_with_output().await.map_err(|e| format!("kakasi: {e}"))?;
     let text = String::from_utf8_lossy(&out.stdout);
     let mut annotated = text.split('\n');
-
-    Ok(lines
+    Ok(parts
         .iter()
-        .zip(&parts)
-        .map(|(line, line_parts)| {
-            let mut pieces: Vec<Ruby> = Vec::new();
-            for (i, _) in line_parts.iter().enumerate() {
-                if i > 0 {
-                    pieces.push(Ruby { text: " ".into(), reading: None });
-                }
-                let words = annotated.next().unwrap_or("");
-                pieces.extend(words.split(' ').filter(|w| !w.is_empty()).flat_map(word_pieces));
-            }
-            let rebuilt: String = pieces.iter().map(|p| p.text.as_str()).collect();
-            if rebuilt == *line { merge_plain(pieces) } else { vec![Ruby { text: line.clone(), reading: None }] }
+        .map(|_| {
+            let words = annotated.next().unwrap_or("");
+            words.split(' ').filter(|w| !w.is_empty()).flat_map(word_pieces).collect()
         })
         .collect())
+}
+
+/// One word as MeCab splits a line.
+#[derive(Debug, Clone, PartialEq)]
+struct Word {
+    surface: String,
+    /// Dictionary reading in hiragana; `None` for words MeCab doesn't know
+    /// (English, names, symbols).
+    reading: Option<String>,
+    /// Part of speech and its first subdivision, as in IPAdic (動詞, 自立).
+    pos: (String, String),
+}
+
+/// MeCab's analysis of each of `parts` (which hold no line breaks), or
+/// `None` when MeCab isn't installed or fails, so callers can use kakasi.
+async fn mecab(parts: &[&str]) -> Option<Vec<Vec<Word>>> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut child = tokio::process::Command::new("mecab")
+        .args(["-F", "%m\t%f[0]\t%f[1]\t%f[7]\n", "-U", "%m\t%f[0]\t%f[1]\t\n", "-E", "EOS\n"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    let input = parts.join("\n") + "\n";
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input.as_bytes()).await.ok()?;
+    }
+    let out = child.wait_with_output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let words = parse_mecab(&String::from_utf8_lossy(&out.stdout));
+    (words.len() == parts.len()).then_some(words)
+}
+
+/// Splits MeCab's output (see `mecab`) into lines of words.
+fn parse_mecab(output: &str) -> Vec<Vec<Word>> {
+    let mut lines = Vec::new();
+    let mut words = Vec::new();
+    for row in output.lines() {
+        if row == "EOS" {
+            lines.push(std::mem::take(&mut words));
+            continue;
+        }
+        let mut f = row.split('\t');
+        let surface = f.next().unwrap_or("").to_string();
+        let pos = (f.next().unwrap_or("").to_string(), f.next().unwrap_or("").to_string());
+        let reading = f.next().filter(|r| !r.is_empty() && *r != "*").map(to_hiragana);
+        words.push(Word { surface, reading, pos });
+    }
+    lines
+}
+
+fn to_hiragana(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            'ァ'..='ヶ' => char::from_u32(c as u32 - 0x60).unwrap_or(c),
+            c => c,
+        })
+        .collect()
+}
+
+/// A line for kakasi to romanise, with MeCab's readings in place of kanji
+/// and spaces between words: verb and adjective endings stay on their word
+/// (愛して → あいして), particles stand alone (星空を → ほしぞら を).
+fn mecab_kana(words: &[Word]) -> String {
+    let mut out = String::new();
+    for w in words {
+        let text = match &w.reading {
+            Some(r) if w.surface.chars().any(is_kanji) => r.as_str(),
+            _ => w.surface.as_str(),
+        };
+        let (pos, sub) = (w.pos.0.as_str(), w.pos.1.as_str());
+        let attaches = pos == "助動詞"
+            || (pos == "助詞" && sub == "接続助詞" && matches!(w.surface.as_str(), "て" | "で" | "ちゃ" | "じゃ" | "ば"))
+            || (pos == "動詞" && sub == "接尾")
+            || (pos == "名詞" && sub == "接尾");
+        if !out.is_empty() && !attaches {
+            out.push(' ');
+        }
+        out.push_str(text);
+    }
+    out
 }
 
 /// One kakasi word: `夜空[よぞら]`, `光る[ひかる]`, or plain `が`.
@@ -1222,6 +1360,31 @@ mod tests {
         assert_eq!(spoken_particles("watashi ha  anata wo  mitsumeru"), "watashi wa anata o mitsumeru");
         assert_eq!(spoken_particles("hana  wa saku"), "hana wa saku");
         assert_eq!(spoken_particles("watashi no pa^ka^ niha"), "watashi no paakaa niha");
+    }
+
+    #[test]
+    fn mecab_words_become_furigana_and_spaced_kana() {
+        // What `mecab -F …` prints for two parts: "夜空を眺めて" and "天の川".
+        let out = "夜空\t名詞\t一般\tヨゾラ\nを\t助詞\t格助詞\tヲ\n眺め\t動詞\t自立\tナガメ\n\
+                   て\t助詞\t接続助詞\tテ\nEOS\n天の川\t名詞\t固有名詞\tアマノガワ\nEOS\n";
+        let lines = parse_mecab(out);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1][0].reading.as_deref(), Some("あまのがわ"));
+        // The reading splits over the kanji around the kana in the word.
+        assert_eq!(
+            align("天の川", "あまのがわ"),
+            vec![
+                Ruby { text: "天".into(), reading: Some("あま".into()) },
+                Ruby { text: "の".into(), reading: None },
+                Ruby { text: "川".into(), reading: Some("がわ".into()) },
+            ]
+        );
+        // Kana for romaji: verb ending kept on the verb, particle apart.
+        assert_eq!(mecab_kana(&lines[0]), "よぞら を ながめて");
+        // Unknown words (no reading) are kept as they are.
+        let unknown = parse_mecab("Love\t名詞\t固有名詞\t\nEOS\n");
+        assert_eq!(unknown[0][0].reading, None);
+        assert_eq!(mecab_kana(&unknown[0]), "Love");
     }
 
     #[test]
