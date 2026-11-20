@@ -97,8 +97,8 @@ sudo pacman -S --needed base-devel git rust alsa-lib yt-dlp ffmpeg curl kakasi \
 yay -S mecab-git mecab-ipadic
 
 # Build and install for your user (to ~/.local)
-git clone https://github.com/CodingTort/vr_hv1-music-client.git
-cd vr_hv1-music-client
+git clone https://github.com/CodingTort/vr_hv1-music-player.git
+cd vr_hv1-music-player
 make install
 ```
 
@@ -158,8 +158,8 @@ Everything below is optional. When a tool is missing, the app keeps working with
 ## Installation
 
 ```bash
-git clone https://github.com/CodingTort/vr_hv1-music-client.git
-cd vr_hv1-music-client
+git clone https://github.com/CodingTort/vr_hv1-music-player.git
+cd vr_hv1-music-player
 make install          # builds in release mode, installs to ~/.local
 ```
 
