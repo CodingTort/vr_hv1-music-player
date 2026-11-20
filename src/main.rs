@@ -28,7 +28,7 @@ fn main() -> iced::Result {
                 println!("Native Linux music player with synced lyrics, furigana and romaji,");
                 println!("and YouTube downloads. A fork of lavanda (github.com/sheep-farm/lavanda).");
                 println!();
-                println!("Repository : https://github.com/CodingTort/vr_hv1-s-music-client");
+                println!("Repository : https://github.com/CodingTort/vr_hv1-music-client");
                 println!("License    : MIT");
                 std::process::exit(0);
             }

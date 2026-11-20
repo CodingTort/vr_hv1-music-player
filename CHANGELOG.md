@@ -100,7 +100,7 @@ The first release of this fork, based on [lavanda](https://github.com/sheep-farm
 - Lyrics uploads with a translation woven in highlighted the translation.
 - Leftover `notify-send` processes piled up.
 
-[1.2.1]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.2.1
-[1.2.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.2.0
-[1.1.1]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.1
-[1.1.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.0
+[1.2.1]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.1
+[1.2.0]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.0
+[1.1.1]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.1.1
+[1.1.0]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.1.0

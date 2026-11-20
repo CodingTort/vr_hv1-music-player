@@ -94,8 +94,8 @@ sudo pacman -S --needed base-devel git rust alsa-lib yt-dlp ffmpeg curl kakasi \
 yay -S mecab-git mecab-ipadic
 
 # Build and install for your user (to ~/.local)
-git clone https://github.com/CodingTort/vr_hv1-s-music-client.git
-cd vr_hv1-s-music-client
+git clone https://github.com/CodingTort/vr_hv1-music-client.git
+cd vr_hv1-music-client
 make install
 ```
 
@@ -155,8 +155,8 @@ Everything below is optional. When a tool is missing, the app keeps working with
 ## Installation
 
 ```bash
-git clone https://github.com/CodingTort/vr_hv1-s-music-client.git
-cd vr_hv1-s-music-client
+git clone https://github.com/CodingTort/vr_hv1-music-client.git
+cd vr_hv1-music-client
 make install          # builds in release mode, installs to ~/.local
 ```
 
@@ -225,7 +225,8 @@ select several.
 
 ![The terminal client: library, songs, and synced lyrics with furigana; album art in the player bar](docs/screenshots/terminal.png)
 
-`vrmusic` opens the same player in the terminal: it uses the same library, playlists, likes, lyric
+`vrmusic` opens the same player in the terminal (it has its own page, with downloads and an iPhone guide:
+[vr_hv1-music-player-TUI-VERSION](https://github.com/CodingTort/vr_hv1-music-player-TUI-VERSION)): it uses the same library, playlists, likes, lyric
 timing fixes and settings as the desktop app (run one of the two at a time). It works in any terminal
 with 24-bit colour, including SSH apps on phones, and adapts to the size of the screen:
 
