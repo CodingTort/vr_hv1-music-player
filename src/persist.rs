@@ -230,6 +230,13 @@ pub fn rename_playlist(old: String, new: String) {
     });
 }
 
+/// The playlists' names, alphabetically (the same order on every start).
+pub fn playlist_names() -> Vec<String> {
+    let mut names = get(|db| db.playlists.keys().cloned().collect::<Vec<_>>());
+    names.sort_by_key(|p| p.to_lowercase());
+    names
+}
+
 pub fn add_to_playlist(name: String, path: PathBuf) {
     write(|db| {
         let list = db.playlists.entry(name).or_default();

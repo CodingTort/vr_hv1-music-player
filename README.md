@@ -67,7 +67,9 @@ Japanese music.
 ![Focus layout with the cover, controls and lyrics side by side](docs/screenshots/focus.png)
 
 **Library and downloads**
-- **YouTube search and download** (`y`) through yt-dlp, with thumbnails and automatic retries.
+- **YouTube search and download** (`y`) through yt-dlp, with a large cover preview and automatic retries.
+- **Import from a link**: paste a link to a song, a playlist or an album (YouTube, YouTube Music or any
+  site yt-dlp supports) and download one song, or all of them into a new playlist.
 - **Playlist files**: export a playlist as a tiny CSV of YouTube IDs and import it on another machine.
   Songs you already have are linked, and missing ones are downloaded.
 - Plays MP3, FLAC, OGG, Opus, WAV, AAC, M4A, AIFF and more. Browse by artist, album or genre.
@@ -161,6 +163,9 @@ cd vr_hv1-music-client
 make install          # builds in release mode, installs to ~/.local
 ```
 
+The first build takes about 2 minutes on a recent 8-core or larger machine (longer on fewer cores);
+rebuilding after changing the code takes under half a minute.
+
 `make install` puts these files in place:
 
 | File | Location |
@@ -194,9 +199,15 @@ sung right now; the offset is saved for that song.
 over the kanji. Install MeCab for the most accurate readings: without it, kakasi is used, which
 sometimes misreads conjugated verbs and set phrases.
 
-**YouTube.** Press `y`, type a search and press Enter. Click a result (or pick one with `↑` / `↓` and press
-Enter) to download it into your library.
+**YouTube.** Press `y`, type a search and press Enter. Pick a result with `↑` / `↓` or a click to see its
+cover, then press Enter or **Download** to download it into your library.
 Files are tagged automatically, including the video ID, which playlist files rely on.
+
+**Links.** Paste a link into the same box instead of a search: a song, a playlist or an album (from
+YouTube, YouTube Music, or any site yt-dlp supports), then press Enter. A playlist or album lists all its
+songs: download one, or click **Download all into a playlist** (`A` in the terminal client) to download
+the songs you don't have yet into a new playlist named after it, in the same order. The playlist is
+filled in when the last download finishes.
 
 **Playlist files.** Select a playlist and click its export icon to save a `.csv`. Use the import icon next
 to `+` to load one: matching songs are linked, and missing ones are downloaded from YouTube one by one.
@@ -371,8 +382,8 @@ The player works fully offline. It only goes online for these:
 | What | Sends | To |
 |---|---|---|
 | Lyrics lookup (turn off with `lyrics_online = false`) | the playing song's title, artist and length | lrclib.net |
-| YouTube search and download | your search text, or the video you picked | YouTube, via yt-dlp |
-| Search-result thumbnails | the video ID | i.ytimg.com |
+| YouTube search and download | your search text, the link you pasted, or the video you picked | YouTube (or the pasted link's site), via yt-dlp |
+| Search-result thumbnails and cover previews | the video ID | i.ytimg.com |
 | "Search cover online" in the tag editor (only when you click it) | the album's artist and title | Google Images, in your browser |
 
 Nothing else leaves your computer. The phone player (terminal client, `o`) serves your music only on the

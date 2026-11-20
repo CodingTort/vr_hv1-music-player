@@ -46,6 +46,8 @@ struct RawEntry {
     duration_string: Option<String>,
     duration: Option<f64>,
     webpage_url: Option<String>,
+    /// Entries of a playlist read with --flat-playlist carry their link here.
+    url: Option<String>,
 }
 
 /// `ytsearchN:` returns a playlist wrapper whose results live under `entries`.
@@ -53,19 +55,34 @@ struct RawEntry {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum RawPayload {
-    Playlist { entries: Vec<RawEntry> },
+    Playlist {
+        entries: Vec<RawEntry>,
+        #[serde(default)]
+        title: Option<String>,
+    },
     Single(Box<RawEntry>),
 }
 
-/// Returns an error string if yt-dlp is unusable, otherwise `None`.
+/// Set once yt-dlp has been found working, so later checks are free.
+static YT_DLP_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Returns an error string if yt-dlp is unusable, otherwise `None`. Runs
+/// `yt-dlp --version` (a fraction of a second) only until it has worked once.
 pub fn preflight(cfg: &Config) -> Option<String> {
+    use std::sync::atomic::Ordering;
+    if YT_DLP_OK.load(Ordering::Relaxed) {
+        return None;
+    }
     let out = std::process::Command::new(&cfg.yt_dlp_path)
         .arg("--version")
         .stdin(Stdio::null())
         .output();
 
     match out {
-        Ok(o) if o.status.success() => None,
+        Ok(o) if o.status.success() => {
+            YT_DLP_OK.store(true, Ordering::Relaxed);
+            None
+        }
         Ok(_) => Some(format!(
             "yt-dlp returned an error (is '{}' working?)",
             cfg.yt_dlp_path
@@ -167,17 +184,21 @@ async fn search_once(query: &str, limit: usize) -> Result<Vec<YtResult>, String>
         .map_err(|e| format!("could not parse yt-dlp response: {e}"))?;
 
     let entries = match payload {
-        RawPayload::Playlist { entries } => entries,
+        RawPayload::Playlist { entries, .. } => entries,
         RawPayload::Single(e) => vec![*e],
     };
+    Ok(to_results(entries))
+}
 
-    let results = entries
+fn to_results(entries: Vec<RawEntry>) -> Vec<YtResult> {
+    entries
         .into_iter()
         .filter_map(|e| {
             let id = e.id.clone()?;
             let url = e
                 .webpage_url
                 .clone()
+                .or(e.url.clone().filter(|u| u.starts_with("http")))
                 .unwrap_or_else(|| format!("https://www.youtube.com/watch?v={id}"));
             Some(YtResult {
                 id,
@@ -190,9 +211,87 @@ async fn search_once(query: &str, limit: usize) -> Result<Vec<YtResult>, String>
                 url,
             })
         })
-        .collect();
+        .collect()
+}
 
-    Ok(results)
+/// Whether the search box holds a link rather than words to search for.
+pub fn looks_like_url(text: &str) -> bool {
+    let t = text.trim();
+    !t.contains(char::is_whitespace)
+        && (t.starts_with("http://")
+            || t.starts_with("https://")
+            || t.starts_with("youtu.be/")
+            || t.starts_with("www.youtube.com/")
+            || t.starts_with("youtube.com/")
+            || t.starts_with("music.youtube.com/")
+            || t.starts_with("m.youtube.com/"))
+}
+
+/// What a pasted link points at: one song, or a playlist / album with its
+/// title. Read with --flat-playlist, so even long playlists load quickly.
+#[derive(Debug, Clone)]
+pub struct Resolved {
+    /// The playlist's or album's name; `None` for a single song.
+    pub list_title: Option<String>,
+    pub items: Vec<YtResult>,
+}
+
+pub async fn resolve(link: &str) -> Result<Resolved, String> {
+    let cfg = crate::config::get();
+    if let Some(err) = preflight(cfg) {
+        return Err(err);
+    }
+    let link = link.trim();
+    let link = if link.starts_with("http") { link.to_string() } else { format!("https://{link}") };
+    let out = tokio::time::timeout(
+        SEARCH_TIMEOUT,
+        Command::new(&cfg.yt_dlp_path)
+            .args(["--no-warnings", "--ignore-config", "--flat-playlist", "-J"])
+            .arg(&link)
+            .stdin(Stdio::null())
+            .output(),
+    )
+    .await
+    .map_err(|_| "reading the link timed out after 60s".to_string())?
+    .map_err(|e| format!("could not run yt-dlp: {e}"))?;
+    if !out.status.success() {
+        return Err(clean_error(&String::from_utf8_lossy(&out.stderr), &String::from_utf8_lossy(&out.stdout)));
+    }
+    let payload: RawPayload = serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("could not read yt-dlp's answer: {e}"))?;
+    Ok(match payload {
+        RawPayload::Playlist { entries, title } => Resolved {
+            list_title: Some(title.map(|t| t.trim_start_matches("Album - ").to_string()).unwrap_or_else(|| "Imported".into())),
+            items: to_results(entries),
+        },
+        RawPayload::Single(e) => Resolved { list_title: None, items: to_results(vec![*e]) },
+    })
+}
+
+/// A large thumbnail for a preview: full size (1280×720) when the video has
+/// one, else the 320×180 one.
+pub async fn thumbnail_large(id: String) -> Option<Vec<u8>> {
+    let valid = id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !valid {
+        return None;
+    }
+    for name in ["maxresdefault", "mqdefault"] {
+        let out = tokio::time::timeout(
+            Duration::from_secs(15),
+            Command::new("curl")
+                .args(["--silent", "--fail", "--max-time", "10"])
+                .arg(format!("https://i.ytimg.com/vi/{id}/{name}.jpg"))
+                .stdin(Stdio::null())
+                .output(),
+        )
+        .await
+        .ok()?
+        .ok()?;
+        if out.status.success() && !out.stdout.is_empty() {
+            return Some(out.stdout);
+        }
+    }
+    None
 }
 
 /// A search result's thumbnail (a 320×180 JPEG) from YouTube's image server.
@@ -309,4 +408,45 @@ pub async fn download(url: &str) -> Result<Option<PathBuf>, String> {
         });
 
     Ok(reported)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_are_told_apart_from_searches() {
+        for link in [
+            "https://www.youtube.com/watch?v=abcdefghijk",
+            "https://youtu.be/abcdefghijk",
+            "youtu.be/abcdefghijk",
+            "https://music.youtube.com/playlist?list=OLAK5uy_example",
+            "music.youtube.com/watch?v=abcdefghijk",
+            "  https://soundcloud.com/someone/a-song  ",
+        ] {
+            assert!(looks_like_url(link), "{link}");
+        }
+        for words in ["lofi hip hop", "youtube.com is great", "Ado うっせぇわ", "https://a b"] {
+            assert!(!looks_like_url(words), "{words}");
+        }
+    }
+
+    #[test]
+    fn playlist_and_single_answers_parse() {
+        // Shapes of yt-dlp's -J --flat-playlist output (trimmed).
+        let list = r#"{"_type":"playlist","title":"Album - Night Songs","entries":[
+            {"id":"abcdefghijk","title":"One","url":"https://www.youtube.com/watch?v=abcdefghijk","duration":201},
+            {"id":"bcdefghijkl","title":"Two","channel":"Band"}]}"#;
+        let RawPayload::Playlist { entries, title } = serde_json::from_str(list).unwrap() else { panic!() };
+        assert_eq!(title.as_deref(), Some("Album - Night Songs"));
+        let items = to_results(entries);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].url, "https://www.youtube.com/watch?v=abcdefghijk");
+        assert_eq!(items[0].duration, "3:21");
+        assert_eq!(items[1].uploader, "Band");
+        assert_eq!(items[1].url, "https://www.youtube.com/watch?v=bcdefghijkl");
+        let single = r#"{"id":"abcdefghijk","title":"One","webpage_url":"https://www.youtube.com/watch?v=abcdefghijk","duration_string":"3:21"}"#;
+        let RawPayload::Single(e) = serde_json::from_str(single).unwrap() else { panic!() };
+        assert_eq!(to_results(vec![*e])[0].title, "One");
+    }
 }

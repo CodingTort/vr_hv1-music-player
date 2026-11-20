@@ -4,6 +4,39 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-11-21
+
+### Added
+
+- **Links in the YouTube dialog** (`y`, desktop app and terminal client): paste a link to a song, a
+  playlist or an album (YouTube, YouTube Music, or any site yt-dlp supports) instead of a search. A
+  playlist or album lists all its songs: download one, or all of them into a new playlist named after it
+  (**Download all into a playlist**, or `A` in the terminal client). Songs you already have are linked
+  instead of downloaded again.
+- The YouTube dialog shows a large preview of the selected result's cover, with its title, channel and
+  length.
+
+### Changed
+
+- The YouTube dialog is bigger, with rounded corners, results and search box. The search box has the
+  keyboard focus when the dialog opens.
+- **Faster to build**: the release build is optimised for speed instead of size, without whole-program
+  optimisation. On a 20-core machine a clean build takes 2 minutes instead of 3, and a rebuild after
+  changing the app's code 25 seconds instead of 2 minutes. The program is just as fast (the binaries are
+  larger: 25 MB instead of 15).
+- **Smoother with big libraries**: the song list only builds the rows on screen. With 1,500 songs listed,
+  building each frame takes a fifth of the time it did.
+- **An idle player stays idle**: the visualiser stops redrawing the window a second after the music
+  stops. Before, it redrew 30 times a second, using about 30 % of a CPU core with nothing playing.
+- Playlists list their songs in the playlist's own order (an imported album plays in album order), and
+  the playlist names are sorted alphabetically (they came in a different order on every start).
+- Long titles in the song list stay on one line instead of wrapping into two clipped half-lines.
+
+### Fixed
+
+- Opening the YouTube dialog and every search briefly froze the window while it checked that yt-dlp
+  works. The check now runs in the background, once.
+
 ## [1.2.2] - 2026-11-20
 
 ### Changed
@@ -114,6 +147,7 @@ The first release of this fork, based on [lavanda](https://github.com/sheep-farm
 - Lyrics uploads with a translation woven in highlighted the translation.
 - Leftover `notify-send` processes piled up.
 
+[1.3.0]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.3.0
 [1.2.2]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.2
 [1.2.1]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.1
 [1.2.0]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.0

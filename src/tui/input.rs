@@ -305,10 +305,17 @@ fn modal_key(app: &mut App, key: KeyEvent) {
                 match key.code {
                     KeyCode::Esc => app.modal = None,
                     KeyCode::Up if d.cursor == 0 => d.typing = true,
-                    KeyCode::Up => d.cursor -= 1,
-                    KeyCode::Down => d.cursor = (d.cursor + 1).min(d.results.len().saturating_sub(1)),
+                    KeyCode::Up => {
+                        d.cursor -= 1;
+                        app.youtube_preview();
+                    }
+                    KeyCode::Down => {
+                        d.cursor = (d.cursor + 1).min(d.results.len().saturating_sub(1));
+                        app.youtube_preview();
+                    }
                     KeyCode::Char('/') | KeyCode::Tab => d.typing = true,
                     KeyCode::Enter => app.youtube_download(),
+                    KeyCode::Char('A') => app.youtube_download_all(),
                     _ => {}
                 }
             }
@@ -362,6 +369,7 @@ pub fn on_mouse(app: &mut App, m: MouseEvent) {
                     Modal::YouTube(dlg) if !dlg.results.is_empty() => {
                         dlg.typing = false;
                         dlg.cursor = (dlg.cursor as isize + d.signum()).clamp(0, dlg.results.len() as isize - 1) as usize;
+                        app.youtube_preview();
                     }
                     Modal::AddToPlaylist { cursor, .. } => {
                         let n = app_playlists_len(&app.nav) + 1;
@@ -451,6 +459,8 @@ fn modal_click(app: &mut App, x: u16, y: u16, double: bool) {
             d.cursor = row;
             if double {
                 app.youtube_download();
+            } else {
+                app.youtube_preview();
             }
         }
         Some(Modal::AddToPlaylist { path, cursor }) => {

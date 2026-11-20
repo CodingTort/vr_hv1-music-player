@@ -113,6 +113,15 @@ pub struct YtSearchState {
     pub thumbs: HashMap<String, iced::widget::image::Handle>,
     /// Results downloaded since the dialog opened.
     pub saved: HashSet<usize>,
+    /// Large cover of the selected result.
+    pub preview: Option<(String, iced::widget::image::Handle)>,
+    /// Set when the results are a pasted playlist or album: its name.
+    pub list_title: Option<String>,
+    /// yt-dlp is being checked when the dialog opens.
+    pub checking: bool,
+    /// The text the shown results are for: Enter on the same text downloads
+    /// the selected result instead of searching again.
+    pub searched: String,
 }
 
 // ── Playlist import ───────────────────────────────────────────────────────────
@@ -120,7 +129,7 @@ pub struct YtSearchState {
 pub struct ImportJob {
     pub name: String,
     rows: Vec<crate::playlist_io::Row>,
-    /// YouTube ids still to download.
+    /// Links of the songs still to download.
     pending: std::collections::VecDeque<String>,
     pub total: usize,
     pub done: usize,
@@ -184,6 +193,7 @@ pub enum Message {
     Audio(AudioEvent),
     Mpris(MprisCommand),
     SpectrumData(Vec<f32>),
+    TracklistScrolled(f32, f32),
     CheckTheme,
     WindowResized(f32, f32),
 
@@ -244,6 +254,10 @@ pub enum Message {
     CloseYtSearch,
     YtQueryChanged(String),
     YtSubmit,
+    YtChecked(Option<String>),
+    YtResolved(Result<crate::youtube::Resolved, String>),
+    YtPreview(String, Option<iced::widget::image::Handle>),
+    YtDownloadAll,
     YtSearched(Result<Vec<crate::youtube::YtResult>, String>),
     YtSelect(usize),
     YtDownload(usize),
@@ -433,6 +447,10 @@ pub struct AppState {
     pub playlist_height_initialized: bool,
     pub dragging_playlist_split: bool,
     pub window_height: f32,
+    /// Scroll position and visible height of the track list, so that only
+    /// the rows on screen are built.
+    pub tracklist_offset: f32,
+    pub tracklist_view_h: f32,
 
     // Sidebar
     pub sidebar_width: f32,
@@ -598,6 +616,8 @@ impl AppState {
             playlist_height_initialized: false,
             dragging_playlist_split: false,
             window_height: 640.0,
+            tracklist_offset: 0.0,
+            tracklist_view_h: 0.0,
             sidebar_width: load_sidebar_width(),
             dragging_sidebar: false,
             is_hovering_tracklist: false,
@@ -707,6 +727,70 @@ impl AppState {
             None if romaji => (primary, Some("Converting to romaji…".into())),
             None => (primary, Some("Looking for the Japanese lyrics…".into())),
         }
+    }
+
+    /// Scrolls the track list so the row at `y` is a little below the top.
+    /// The position is recorded too: only rows near it are built, and a
+    /// programmatic scroll isn't reported back like a manual one.
+    fn scroll_tracklist_to(&mut self, y: f32) -> Task<Message> {
+        let y = (y - 120.0).max(0.0);
+        self.tracklist_offset = y;
+        iced::widget::scrollable::scroll_to(
+            iced::widget::scrollable::Id::new("tracklist_scroll"),
+            iced::widget::scrollable::AbsoluteOffset { x: 0.0, y },
+        )
+    }
+
+    /// Loads the large cover of the selected YouTube result, if not shown yet.
+    fn yt_preview_task(&self) -> Task<Message> {
+        let Some(d) = self.yt_dialog.as_ref() else { return Task::none() };
+        let Some(r) = d.selected.and_then(|i| d.results.get(i)) else { return Task::none() };
+        if d.preview.as_ref().is_some_and(|(id, _)| *id == r.id) {
+            return Task::none();
+        }
+        let id = r.id.clone();
+        Task::perform(
+            async move {
+                let bytes = crate::youtube::thumbnail_large(id.clone()).await;
+                let handle = tokio::task::spawn_blocking(move || bytes.as_deref().and_then(preview_image)).await.ok().flatten();
+                (id, handle)
+            },
+            |(id, handle)| Message::YtPreview(id, handle),
+        )
+    }
+
+    /// Makes a playlist named after `stem` (never replacing one) from `rows`:
+    /// songs already in the library are added now, the rest are downloaded
+    /// one by one from `link(row)` and added when all are done.
+    fn begin_import(&mut self, stem: String, rows: Vec<crate::playlist_io::Row>, link: impl Fn(&crate::playlist_io::Row) -> String) -> Task<Message> {
+        if self.import_job.is_some() {
+            self.set_status("An import is already running".into());
+            return Task::none();
+        }
+        let existing = crate::persist::get(|db| db.playlists.keys().cloned().collect::<HashSet<_>>());
+        let name = (1..)
+            .map(|n| if n == 1 { stem.clone() } else { format!("{stem} ({n})") })
+            .find(|n| !existing.contains(n))
+            .unwrap_or(stem);
+        let have: HashSet<&str> = self.all_tracks.iter().filter_map(|t| t.yt_id.as_deref()).collect();
+        let mut queued = HashSet::new();
+        let pending: std::collections::VecDeque<String> = rows
+            .iter()
+            .filter(|r| !r.id.is_empty() && !have.contains(r.id.as_str()) && queued.insert(r.id.clone()))
+            .map(&link)
+            .collect();
+        let paths = self.import_paths(&rows);
+        let found = paths.len();
+        crate::persist::write(|db| {
+            db.playlists.insert(name.clone(), paths);
+        });
+        if pending.is_empty() {
+            self.set_status(format!("Imported “{name}” ({found} songs)"));
+            return Task::none();
+        }
+        let total = pending.len();
+        self.import_job = Some(ImportJob { name, rows, pending, total, done: 0, failed: 0 });
+        Task::done(Message::ImportNext)
     }
 
     /// A playlist file's songs, in file order: matched by YouTube id, or by
@@ -980,8 +1064,17 @@ impl AppState {
                 self.tracks = temp;
                 return;
             } else {
+                // In the playlist's own order (an imported album plays in
+                // album order), each song once, skipping songs no longer in
+                // the library.
                 let paths = crate::persist::get(|db| db.playlists.get(playlist_name).cloned().unwrap_or_default());
-                self.tracks = self.all_tracks.iter().filter(|t| paths.contains(&t.path)).cloned().collect();
+                let by_path: HashMap<&PathBuf, &Track> = self.all_tracks.iter().map(|t| (&t.path, t)).collect();
+                let mut seen = HashSet::new();
+                self.tracks = paths
+                    .iter()
+                    .filter(|p| seen.insert(*p))
+                    .filter_map(|p| by_path.get(p).map(|t| (*t).clone()))
+                    .collect();
             }
         } else {
             match self.view_mode {
@@ -1038,7 +1131,8 @@ impl AppState {
     }
 
     pub fn calculate_scroll_offset(&self, track_id: i64) -> Option<f32> {
-        let row_h = 34.0;
+        use crate::ui::views::library::{ALBUM_GAP_H, ALBUM_HEADER_H, ROW_H};
+        let row_h = ROW_H;
         if self.group_by_album {
             let mut y = 0.0;
             let mut groups: Vec<(String, Vec<&Track>)> = Vec::new();
@@ -1051,10 +1145,10 @@ impl AppState {
             for (_album, tracks) in groups {
                 if tracks.iter().any(|t| t.id == track_id) {
                     let idx = tracks.iter().position(|t| t.id == track_id).unwrap();
-                    y += 28.0 + idx as f32 * row_h;
+                    y += ALBUM_HEADER_H + idx as f32 * row_h;
                     return Some(y);
                 }
-                y += 28.0 + tracks.len() as f32 * row_h + 8.0;
+                y += ALBUM_HEADER_H + tracks.len() as f32 * row_h + ALBUM_GAP_H;
             }
             None
         } else {
@@ -1081,14 +1175,29 @@ impl AppState {
             // ── YouTube search (yt-dlp) ──────────────────────────────────────
 
             Message::OpenYtSearch => {
-                // Fail fast with a useful message rather than a cryptic spawn
-                // error later on.
-                let preflight_error = crate::youtube::preflight(crate::config::get());
+                // yt-dlp is checked in the background (it takes a moment the
+                // first time), so the dialog opens at once.
                 self.yt_dialog = Some(YtSearchState {
                     query: self.search_query.clone(),
-                    preflight_error,
+                    checking: true,
                     ..YtSearchState::default()
                 });
+                // Typing goes straight into the search box (not to the
+                // player's shortcuts behind the dialog).
+                Task::batch([
+                    iced::widget::text_input::focus(iced::widget::text_input::Id::new(crate::ui::components::yt_search::QUERY_ID)),
+                    Task::perform(
+                        async { tokio::task::spawn_blocking(|| crate::youtube::preflight(crate::config::get())).await.ok().flatten() },
+                        Message::YtChecked,
+                    ),
+                ])
+            }
+
+            Message::YtChecked(err) => {
+                if let Some(d) = self.yt_dialog.as_mut() {
+                    d.checking = false;
+                    d.preflight_error = err;
+                }
                 Task::none()
             }
 
@@ -1108,17 +1217,46 @@ impl AppState {
                 let Some(d) = self.yt_dialog.as_mut() else { return Task::none() };
                 let query = d.query.trim().to_string();
                 if query.is_empty() {
-                    d.error = Some("Type something to search for.".into());
+                    d.error = Some("Type something to search for, or paste a link.".into());
                     return Task::none();
                 }
+                if !d.results.is_empty() && query == d.searched {
+                    if let Some(i) = d.selected {
+                        return Task::done(Message::YtDownload(i));
+                    }
+                }
+                d.searched = query.clone();
                 d.searching = true;
                 d.error = None;
                 d.status = None;
+                if crate::youtube::looks_like_url(&query) {
+                    return Task::perform(async move { crate::youtube::resolve(&query).await }, Message::YtResolved);
+                }
                 Task::perform(
                     async move { crate::youtube::search(&query, crate::config::get().yt_search_results).await },
                     Message::YtSearched,
                 )
             }
+
+            Message::YtResolved(res) => match res {
+                Ok(r) => {
+                    let n = r.items.len();
+                    let list_title = r.list_title.clone();
+                    let status = match &list_title {
+                        Some(t) => format!("“{t}”: {n} songs. Download one, or all of them into a playlist"),
+                        None => "Press Enter or Download to save it".to_string(),
+                    };
+                    let task = self.update(Message::YtSearched(Ok(r.items)));
+                    if let Some(d) = self.yt_dialog.as_mut() {
+                        d.list_title = list_title;
+                        if d.error.is_none() {
+                            d.status = Some(status);
+                        }
+                    }
+                    task
+                }
+                Err(e) => self.update(Message::YtSearched(Err(e))),
+            },
 
             Message::YtSearched(res) => {
                 match res {
@@ -1126,19 +1264,21 @@ impl AppState {
                         if let Some(ref mut d) = self.yt_dialog {
                             d.searching = false;
                             d.preflight_error = None;
+                            d.list_title = None;
                             if results.is_empty() {
                                 d.error = Some("No results found.".into());
                             } else {
                                 d.results = results;
                                 d.thumbs.clear();
                                 d.saved.clear();
-                                d.status = Some(format!(
-                                    "{} results — Enter to download, ↓/↑ to pick",
-                                    d.results.len()
-                                ));
+                                d.preview = None;
+                                d.selected = Some(0);
+                                d.status = Some(format!("{} results", d.results.len()));
                                 // Thumbnails load in the background, all at once.
                                 let radius = self.corner_radius;
-                                return Task::batch(d.results.iter().map(|r| {
+                                let preview = self.yt_preview_task();
+                                let Some(d) = self.yt_dialog.as_ref() else { return preview };
+                                return Task::batch(std::iter::once(preview).chain(d.results.iter().map(|r| {
                                     let id = r.id.clone();
                                     Task::perform(
                                         async move {
@@ -1153,7 +1293,7 @@ impl AppState {
                                         },
                                         |(id, handle)| Message::YtThumb(id, handle),
                                     )
-                                }));
+                                })));
                             }
                         }
                     }
@@ -1171,7 +1311,30 @@ impl AppState {
                 if let Some(ref mut d) = self.yt_dialog {
                     d.selected = Some(i);
                 }
+                self.yt_preview_task()
+            }
+
+            Message::YtPreview(id, handle) => {
+                if let (Some(d), Some(handle)) = (self.yt_dialog.as_mut(), handle) {
+                    // Only if that result is still the selected one.
+                    if d.selected.and_then(|i| d.results.get(i)).is_some_and(|r| r.id == id) {
+                        d.preview = Some((id, handle));
+                    }
+                }
                 Task::none()
+            }
+
+            Message::YtDownloadAll => {
+                let Some(d) = self.yt_dialog.as_ref() else { return Task::none() };
+                let stem = d.list_title.clone().unwrap_or_else(|| "Imported".into());
+                let links: HashMap<String, String> = d.results.iter().map(|r| (r.id.clone(), r.url.clone())).collect();
+                let rows: Vec<crate::playlist_io::Row> = d
+                    .results
+                    .iter()
+                    .map(|r| crate::playlist_io::Row { id: r.id.clone(), title: r.title.clone(), artist: r.uploader.clone() })
+                    .collect();
+                self.yt_dialog = None;
+                self.begin_import(stem, rows, move |r| links.get(&r.id).cloned().unwrap_or_default())
             }
 
             Message::YtDownload(i) => {
@@ -1433,7 +1596,7 @@ impl AppState {
                 self.search_query.clear();
                 match tab {
                     PlaylistTab::Playlists => {
-                        let playlists = crate::persist::get(|db| db.playlists.keys().cloned().collect::<Vec<_>>());
+                        let playlists = crate::persist::playlist_names();
                         self.selected_playlist = playlists.first().cloned();
                     }
                     PlaylistTab::Autoplaylists => {
@@ -1515,10 +1678,7 @@ impl AppState {
                     self.update_filtered_tracks();
                     self.selected_track = Some(current.clone());
                     if let Some(y) = self.calculate_scroll_offset(current.id) {
-                        return iced::widget::scrollable::scroll_to(
-                            iced::widget::scrollable::Id::new("tracklist_scroll"),
-                            iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (y - 120.0).max(0.0) },
-                        );
+                        return self.scroll_tracklist_to(y);
                     }
                 }
                 Task::none()
@@ -1645,7 +1805,7 @@ impl AppState {
                     PlaylistDialogMode::AddTrack(_) => String::new(),
                     PlaylistDialogMode::Rename(old) => old.clone(),
                 };
-                let playlists = crate::persist::get(|db| db.playlists.keys().cloned().collect::<Vec<_>>());
+                let playlists = crate::persist::playlist_names();
                 let first = playlists.first().cloned();
                 self.playlist_dialog = Some(PlaylistDialogState {
                     mode,
@@ -2056,39 +2216,14 @@ impl AppState {
                 }
                 // Named after the file, never replacing an existing playlist.
                 let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Imported".into());
-                let existing = crate::persist::get(|db| db.playlists.keys().cloned().collect::<HashSet<_>>());
-                let name = (1..)
-                    .map(|n| if n == 1 { stem.clone() } else { format!("{stem} ({n})") })
-                    .find(|n| !existing.contains(n))
-                    .unwrap_or(stem);
-
-                // Songs already here are added now; the rest are downloaded.
-                let have: HashSet<&str> = self.all_tracks.iter().filter_map(|t| t.yt_id.as_deref()).collect();
-                let mut queued = HashSet::new();
-                let pending: std::collections::VecDeque<String> = rows
-                    .iter()
-                    .filter(|r| !r.id.is_empty() && !have.contains(r.id.as_str()) && queued.insert(r.id.clone()))
-                    .map(|r| r.id.clone())
-                    .collect();
-                let paths = self.import_paths(&rows);
-                let found = paths.len();
-                crate::persist::write(|db| {
-                    db.playlists.insert(name.clone(), paths);
-                });
-                if pending.is_empty() {
-                    self.set_status(format!("Imported “{name}” ({found} songs)"));
-                    return Task::none();
-                }
-                let total = pending.len();
-                self.import_job = Some(ImportJob { name, rows, pending, total, done: 0, failed: 0 });
-                Task::done(Message::ImportNext)
+                self.begin_import(stem, rows, |r| format!("https://www.youtube.com/watch?v={}", r.id))
             }
 
             Message::ImportNext => {
                 let Some(job) = self.import_job.as_mut() else { return Task::none() };
                 match job.pending.pop_front() {
-                    Some(id) => Task::perform(
-                        async move { crate::youtube::download(&format!("https://www.youtube.com/watch?v={id}")).await },
+                    Some(link) => Task::perform(
+                        async move { crate::youtube::download(&link).await },
                         Message::ImportDownloaded,
                     ),
                     // All fetched: rescan, then link the new files.
@@ -2184,6 +2319,12 @@ impl AppState {
             Message::LyricsNudge(delta) => self.set_lyrics_offset(self.lyrics_offset + delta),
             Message::LyricsOffsetReset => self.set_lyrics_offset(0.0),
 
+            Message::TracklistScrolled(offset, height) => {
+                self.tracklist_offset = offset;
+                self.tracklist_view_h = height;
+                Task::none()
+            }
+
             Message::SpectrumData(bins) => {
                 // Bars jump up with a hit and fall back more slowly, so beats
                 // read clearly without the display flickering.
@@ -2211,10 +2352,7 @@ impl AppState {
                         self.selected_tracks = vec![track.clone()];
                         self.last_clicked_track = Some(track.clone());
                         if let Some(y) = self.calculate_scroll_offset(track.id) {
-                            return iced::widget::scrollable::scroll_to(
-                                iced::widget::scrollable::Id::new("tracklist_scroll"),
-                                iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (y - 120.0).max(0.0) },
-                            );
+                            return self.scroll_tracklist_to(y);
                         }
                     }
                 }
@@ -2236,10 +2374,7 @@ impl AppState {
                         self.selected_tracks = vec![track.clone()];
                         self.last_clicked_track = Some(track.clone());
                         if let Some(y) = self.calculate_scroll_offset(track.id) {
-                            return iced::widget::scrollable::scroll_to(
-                                iced::widget::scrollable::Id::new("tracklist_scroll"),
-                                iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (y - 120.0).max(0.0) },
-                            );
+                            return self.scroll_tracklist_to(y);
                         }
                     }
                 }
@@ -2836,7 +2971,7 @@ impl AppState {
     fn context_menu_view(&self, target: &ContextMenuTarget) -> Element<'_, Message> {
         use iced::widget::button;
 
-        let custom_playlists = crate::persist::get(|db| db.playlists.keys().cloned().collect::<Vec<_>>());
+        let custom_playlists = crate::persist::playlist_names();
 
         let item_style = |_: &iced::Theme, status: iced::widget::button::Status| {
             let hovered = matches!(status, iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed);
@@ -3123,10 +3258,7 @@ impl AppState {
         let _ = self.tray_song_tx.send(format!("{} — {}", track.title, track.artist));
 
         let scroll = if let Some(y) = self.calculate_scroll_offset(track.id) {
-            iced::widget::scrollable::scroll_to(
-                iced::widget::scrollable::Id::new("tracklist_scroll"),
-                iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (y - 120.0).max(0.0) },
-            )
+            self.scroll_tracklist_to(y)
         } else {
             Task::none()
         };
@@ -3219,6 +3351,15 @@ fn rounded_thumbnail(bytes: &[u8], radius: f32) -> Option<iced::widget::image::H
     let img = image::load_from_memory(bytes).ok()?;
     let mut px = img.resize_to_fill(192, 108, image::imageops::FilterType::Triangle).to_rgba8();
     round_corners(&mut px, radius * 2.0);
+    Some(iced::widget::image::Handle::from_rgba(px.width(), px.height(), px.into_raw()))
+}
+
+/// A YouTube cover for the search preview: 640×360 (shown at 320×180) with
+/// rounded corners.
+fn preview_image(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let mut px = img.resize_to_fill(640, 360, image::imageops::FilterType::Triangle).to_rgba8();
+    round_corners(&mut px, 28.0);
     Some(iced::widget::image::Handle::from_rgba(px.width(), px.height(), px.into_raw()))
 }
 

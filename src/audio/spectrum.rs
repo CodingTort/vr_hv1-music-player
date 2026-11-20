@@ -14,11 +14,23 @@ const SAMPLE_RATE: f32 = 48000.0;
 pub fn launch(viz_buf: Arc<Mutex<VecDeque<f32>>>, tx: UnboundedSender<Vec<f32>>) {
     std::thread::spawn(move || {
         let mut analyzer = Analyzer::new();
+        // Frames sent since audio last arrived. Every frame makes the window
+        // redraw, so after the bars have had time to fall to zero, nothing
+        // more is sent until music plays again: an idle player stays idle.
+        let mut silent_frames = 0u32;
         loop {
             std::thread::sleep(Duration::from_millis(33));
 
             let samples: Vec<f32> = {
                 let mut buf = viz_buf.lock().unwrap();
+                if buf.is_empty() {
+                    silent_frames += 1;
+                } else {
+                    silent_frames = 0;
+                }
+                if silent_frames > SETTLE_FRAMES {
+                    continue;
+                }
                 let n = buf.len().min(FFT_SIZE);
                 let skip = buf.len().saturating_sub(FFT_SIZE);
                 let v: Vec<f32> = buf.iter().skip(skip).copied().collect();
@@ -36,6 +48,10 @@ pub fn launch(viz_buf: Arc<Mutex<VecDeque<f32>>>, tx: UnboundedSender<Vec<f32>>)
         }
     });
 }
+
+/// Silent frames sent after the music stops, so the bars fall smoothly to
+/// zero before the visualiser goes quiet (about a second).
+const SETTLE_FRAMES: u32 = 30;
 
 /// Turns ~33 ms of audio into bar heights (0‥1).
 ///

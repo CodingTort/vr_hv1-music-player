@@ -10,7 +10,15 @@ use crate::library::models::Track;
 use crate::persist::TableColumn;
 use crate::ui::{icons, theme};
 
-const ROW_H: f32 = 34.0;
+/// Heights in the track list. Every item has a fixed height, so only the
+/// rows on screen need building (see `track_list_view`).
+pub const ROW_H: f32 = 34.0;
+/// One line of 13 px row text.
+const CELL_LINE_H: f32 = 17.0;
+pub const ALBUM_HEADER_H: f32 = 34.0;
+pub const ALBUM_GAP_H: f32 = 6.0;
+/// Rows built above and below the visible part, for smooth scrolling.
+const OVERSCAN_PX: f32 = 600.0;
 /// Largura da coluna de favorito (coração), compartilhada entre header e linhas.
 const LIKE_COL_W: f32 = 60.0;
 
@@ -251,8 +259,7 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
     .into();
 
     let list: Element<Message> = if is_playlists {
-        let playlists =
-            crate::persist::get(|db| db.playlists.keys().cloned().collect::<Vec<_>>());
+        let playlists = crate::persist::playlist_names();
 
         if playlists.is_empty() {
             container(
@@ -423,34 +430,52 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
     let toolbar = toolbar_view(state);
     let header = build_column_header(visible_cols.clone(), col_widths.clone(), sort_col, sort_asc);
 
-    let mut rows: Vec<Element<Message>> = Vec::new();
-
     let current_id = state.current_track.as_ref().map(|t| t.id);
     let selected_ids: Vec<i64> = state.selected_tracks.iter().map(|t| t.id).collect();
     let multi_selected = state.selected_tracks.clone();
 
+    // The list as items of known height. Only those near the visible part are
+    // built (this view is rebuilt ~30 times a second while the visualiser
+    // runs, and building every row of a large library made the app lag);
+    // the rest is empty space of the same height.
+    enum Item<'a> {
+        Header(&'a str, usize),
+        Track(&'a Track),
+        Gap,
+    }
+    let mut items: Vec<Item> = Vec::with_capacity(state.tracks.len() + 8);
     if group {
-        let mut groups: Vec<(String, Vec<Track>)> = Vec::new();
-        for track in &state.tracks {
-            if let Some(last) = groups.last_mut() {
-                if last.0 == track.album {
-                    last.1.push(track.clone());
-                    continue;
-                }
-            }
-            groups.push((track.album.clone(), vec![track.clone()]));
+        let mut i = 0;
+        while i < state.tracks.len() {
+            let album = state.tracks[i].album.as_str();
+            let end = state.tracks[i..].iter().position(|t| t.album != album).map_or(state.tracks.len(), |n| i + n);
+            items.push(Item::Header(album, end - i));
+            items.extend(state.tracks[i..end].iter().map(Item::Track));
+            items.push(Item::Gap);
+            i = end;
         }
+    } else {
+        items.extend(state.tracks.iter().map(Item::Track));
+    }
+    let height = |item: &Item| match item {
+        Item::Header(..) => ALBUM_HEADER_H,
+        Item::Track(_) => ROW_H,
+        Item::Gap => ALBUM_GAP_H,
+    };
+    let view_h = if state.tracklist_view_h > 0.0 { state.tracklist_view_h } else { state.window_height };
+    let heights: Vec<f32> = items.iter().map(height).collect();
+    let (shown, above, below) = visible_items(&heights, state.tracklist_offset, view_h);
 
-        for (album_name, tracks) in groups {
-            let count = tracks.len();
-            let album_label = album_name.clone();
-            let album_hdr: Element<Message> = container(
+    let mut rows: Vec<Element<Message>> = Vec::new();
+    for item in &items[shown] {
+        rows.push(match item {
+            Item::Header(album, count) => container(
                 row![
                     text(icons::ICON_LIST)
                         .font(icons::NERD_FONT_MONO)
                         .size(22)
                         .color(theme::accent()),
-                    text(album_label)
+                    text(album.to_string())
                         .size(12)
                         .color(theme::accent())
                         .font(icons::UI_FONT_BOLD)
@@ -460,40 +485,34 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center)
-                .padding([5, 12]),
+                .padding([0, 12]),
             )
             .style(theme::album_header)
             .width(Length::Fill)
-            .into();
-            rows.push(album_hdr);
-
-            for track in tracks {
-                rows.push(build_track_row(
-                    track,
-                    current_id,
-                    &selected_ids,
-                    &multi_selected,
-                    visible_cols.clone(),
-                    col_widths.clone(),
-                ));
-            }
-            rows.push(Space::with_height(6).into());
-        }
-    } else {
-        for track in state.tracks.iter() {
-            rows.push(build_track_row(
-                track.clone(),
+            .height(Length::Fixed(ALBUM_HEADER_H))
+            .align_y(iced::alignment::Vertical::Center)
+            .into(),
+            Item::Track(track) => build_track_row(
+                (*track).clone(),
                 current_id,
                 &selected_ids,
                 &multi_selected,
                 visible_cols.clone(),
                 col_widths.clone(),
-            ));
-        }
+            ),
+            Item::Gap => Space::with_height(ALBUM_GAP_H).into(),
+        });
+    }
+    if above > 0.0 {
+        rows.insert(0, Space::with_height(above).into());
+    }
+    if below > 0.0 {
+        rows.push(Space::with_height(below).into());
     }
 
     let scroll = scrollable(column(rows).spacing(0))
         .id(scrollable::Id::new("tracklist_scroll"))
+        .on_scroll(|v| Message::TracklistScrolled(v.absolute_offset().y, v.bounds().height))
         .height(Length::Fill);
 
     let content = column![toolbar, header, scroll]
@@ -505,6 +524,31 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
         .on_enter(Message::HoverTracklist(true))
         .on_exit(Message::HoverTracklist(false))
         .into()
+}
+
+/// Which items of the list (by height) to build for a scroll position: the
+/// visible ones plus `OVERSCAN_PX` either side, and the heights of the
+/// unbuilt parts above and below. A position past the end (left from a longer
+/// list) counts as the end, as the scrollable itself treats it.
+fn visible_items(heights: &[f32], offset: f32, view_h: f32) -> (std::ops::Range<usize>, f32, f32) {
+    let total: f32 = heights.iter().sum();
+    let offset = offset.min((total - view_h).max(0.0)).max(0.0);
+    let (from, to) = (offset - OVERSCAN_PX, offset + view_h + OVERSCAN_PX);
+    let (mut y, mut first, mut last, mut above) = (0.0f32, heights.len(), 0, 0.0f32);
+    for (i, &h) in heights.iter().enumerate() {
+        if y + h < from {
+            above += h;
+        } else if y <= to {
+            first = first.min(i);
+            last = i + 1;
+        }
+        y += h;
+    }
+    if first > last {
+        return (0..0, total, 0.0);
+    }
+    let shown: f32 = heights[first..last].iter().sum();
+    (first..last, above, total - above - shown)
 }
 
 fn build_column_header(
@@ -674,7 +718,16 @@ fn build_track_row(
                 TableColumn::Artist | TableColumn::Album | TableColumn::Genre => theme::subtext(),
                 _ => theme::subtext(),
             };
-            text(cell_text).size(13).color(cell_color).width(w).shaping(Shaping::Advanced).into()
+            // Rows have a fixed height, so a cell shows one line: long text
+            // that wraps is cut after its first line instead of showing two
+            // squeezed half-lines. (iced 0.13 ignores `Wrapping::None` for
+            // plain text, so the clipping does it.)
+            container(text(cell_text).size(13).color(cell_color).shaping(Shaping::Advanced))
+                .width(w)
+                .height(Length::Fixed(CELL_LINE_H))
+                .padding(iced::Padding { right: 10.0, ..iced::Padding::ZERO })
+                .clip(true)
+                .into()
         })
         .collect();
 
@@ -773,5 +826,31 @@ fn table_col_to_sort(col: TableColumn) -> SortColumn {
         TableColumn::Duration => SortColumn::Duration,
         TableColumn::Plays => SortColumn::Plays,
         TableColumn::DatePlayed => SortColumn::DatePlayed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_rows_near_the_view_are_built() {
+        let rows = vec![ROW_H; 3000]; // 102 000 px of songs
+        // At the top: from row 0, as far as the view and the overscan reach.
+        let (shown, above, below) = visible_items(&rows, 0.0, 700.0);
+        assert_eq!(shown.start, 0);
+        assert_eq!(shown.end, ((700.0 + OVERSCAN_PX) / ROW_H).floor() as usize + 1);
+        assert_eq!(above, 0.0);
+        assert!((above + shown.len() as f32 * ROW_H + below - 3000.0 * ROW_H).abs() < 0.01, "total height kept");
+        // Somewhere in the middle: about view + 2 overscans of rows, not 3000.
+        let (shown, above, _) = visible_items(&rows, 34_000.0, 700.0);
+        assert!(shown.len() < 60, "{} rows built", shown.len());
+        assert!(above > 0.0 && shown.contains(&1000));
+        // A position left over from a longer list: shown from its end.
+        let short = vec![ROW_H; 5];
+        let (shown, above, below) = visible_items(&short, 34_000.0, 700.0);
+        assert_eq!((shown, above, below), (0..5, 0.0, 0.0));
+        // Empty list.
+        assert_eq!(visible_items(&[], 500.0, 700.0).0, 0..0);
     }
 }

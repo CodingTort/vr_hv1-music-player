@@ -46,7 +46,7 @@ pub fn view(state: &PlaylistDialogState) -> Element<'_, Message> {
         }
 
         PlaylistDialogMode::AddTrack(track) => {
-            let playlists = crate::persist::get(|db| db.playlists.keys().cloned().collect::<Vec<_>>());
+            let playlists = crate::persist::playlist_names();
 
             let selected_pl = state.selected_playlist.clone();
 

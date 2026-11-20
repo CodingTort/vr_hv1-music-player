@@ -24,6 +24,9 @@ pub enum Job {
     LyricsAlt(PathBuf, Lyrics),
     Furigana(u64, Option<Vec<Vec<Ruby>>>),
     YtResults(u64, Result<Vec<YtResult>, String>),
+    YtResolved(u64, Result<crate::youtube::Resolved, String>),
+    YtChecked(Option<String>),
+    YtPreview(String, Option<image::RgbaImage>),
     YtDownloaded(String, Result<Option<PathBuf>, String>),
     ImportDownloaded(Result<Option<PathBuf>, String>),
     Scanned(Vec<Track>, Rescan),
@@ -202,6 +205,10 @@ pub struct YtDialog {
     pub message: Option<String>,
     pub downloading: HashSet<String>,
     pub saved: HashSet<String>,
+    /// Set when the results are a pasted playlist or album: its name.
+    pub list_title: Option<String>,
+    /// Large cover of the selected result (16:9).
+    pub preview: Option<(String, image::RgbaImage)>,
 }
 
 pub const TAG_FIELDS: [&str; 7] = ["Title", "Artist", "Album", "Genre", "Year", "Track", "Disc"];
@@ -481,8 +488,7 @@ impl App {
 
     pub fn rebuild_nav(&mut self) {
         let selected = self.nav.get(self.nav_cursor).cloned();
-        let mut playlists = crate::persist::get(|db| db.playlists.keys().cloned().collect::<Vec<_>>());
-        playlists.sort_by_key(|p| p.to_lowercase());
+        let playlists = crate::persist::playlist_names();
         self.nav = vec![
             Nav::Songs,
             Nav::Groups(Group::Artist),
@@ -1227,15 +1233,52 @@ impl App {
                 if let Some(Modal::YouTube(d)) = &mut self.modal {
                     if d.search_id == id {
                         d.searching = false;
+                        d.list_title = None;
                         match result {
                             Ok(results) => {
                                 d.message = results.is_empty().then(|| "Nothing found".to_string());
                                 d.results = results;
                                 d.cursor = 0;
+                                d.preview = None;
                                 d.typing = d.results.is_empty();
                             }
                             Err(e) => d.message = Some(e),
                         }
+                    }
+                }
+                self.youtube_preview();
+            }
+            Job::YtResolved(id, result) => {
+                let still = matches!(&self.modal, Some(Modal::YouTube(d)) if d.search_id == id);
+                if still {
+                    match result {
+                        Ok(r) => {
+                            let (title, n) = (r.list_title.clone(), r.items.len());
+                            self.on_job(Job::YtResults(id, Ok(r.items)));
+                            if let Some(Modal::YouTube(d)) = &mut self.modal {
+                                d.list_title = title.clone();
+                                if n > 0 {
+                                    d.message = Some(match title {
+                                        Some(t) => format!("“{t}”: {n} songs. Enter downloads one, A downloads all into a playlist"),
+                                        None => "Enter downloads it".to_string(),
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => self.on_job(Job::YtResults(id, Err(e))),
+                    }
+                }
+            }
+            Job::YtChecked(err) => {
+                if let (Some(err), Some(Modal::YouTube(_))) = (err, &self.modal) {
+                    self.modal = None;
+                    self.error(err);
+                }
+            }
+            Job::YtPreview(id, img) => {
+                if let (Some(Modal::YouTube(d)), Some(img)) = (&mut self.modal, img) {
+                    if d.results.get(d.cursor).is_some_and(|r| r.id == id) {
+                        d.preview = Some((id, img));
                     }
                 }
             }
@@ -1271,10 +1314,12 @@ impl App {
     // ── YouTube ──────────────────────────────────────────────────────────────
 
     pub fn open_youtube(&mut self) {
-        if let Some(err) = crate::youtube::preflight(crate::config::get()) {
-            self.error(err);
-            return;
-        }
+        // yt-dlp is checked in the background: the dialog opens at once.
+        let jobs = self.jobs.clone();
+        self.rt.spawn(async move {
+            let err = tokio::task::spawn_blocking(|| crate::youtube::preflight(crate::config::get())).await.ok().flatten();
+            let _ = jobs.send(Job::YtChecked(err));
+        });
         self.modal = Some(Modal::YouTube(YtDialog {
             input: Input::default(),
             results: Vec::new(),
@@ -1285,7 +1330,44 @@ impl App {
             message: None,
             downloading: HashSet::new(),
             saved: HashSet::new(),
+            list_title: None,
+            preview: None,
         }));
+    }
+
+    /// Loads the large cover of the selected YouTube result.
+    pub fn youtube_preview(&mut self) {
+        let Some(Modal::YouTube(d)) = &self.modal else { return };
+        let Some(r) = d.results.get(d.cursor) else { return };
+        if d.preview.as_ref().is_some_and(|(id, _)| *id == r.id) {
+            return;
+        }
+        let (id, jobs) = (r.id.clone(), self.jobs.clone());
+        self.rt.spawn(async move {
+            let bytes = crate::youtube::thumbnail_large(id.clone()).await;
+            let img = tokio::task::spawn_blocking(move || {
+                let img = image::load_from_memory(bytes.as_deref()?).ok()?;
+                Some(img.resize_to_fill(160, 90, image::imageops::FilterType::Triangle).to_rgba8())
+            })
+            .await
+            .ok()
+            .flatten();
+            let _ = jobs.send(Job::YtPreview(id, img));
+        });
+    }
+
+    /// Downloads every song of a pasted playlist or album into a playlist.
+    pub fn youtube_download_all(&mut self) {
+        let Some(Modal::YouTube(d)) = &self.modal else { return };
+        let Some(stem) = d.list_title.clone() else {
+            self.info("Paste a playlist or album link to download all of it");
+            return;
+        };
+        let links: HashMap<String, String> = d.results.iter().map(|r| (r.id.clone(), r.url.clone())).collect();
+        let rows: Vec<crate::playlist_io::Row> =
+            d.results.iter().map(|r| crate::playlist_io::Row { id: r.id.clone(), title: r.title.clone(), artist: r.uploader.clone() }).collect();
+        self.modal = None;
+        self.begin_import(stem, rows, move |r| links.get(&r.id).cloned().unwrap_or_default());
     }
 
     pub fn youtube_search(&mut self) {
@@ -1301,6 +1383,13 @@ impl App {
         d.search_id = id;
         d.message = None;
         let (jobs, limit) = (self.jobs.clone(), crate::config::get().yt_search_results);
+        if crate::youtube::looks_like_url(&query) {
+            self.rt.spawn(async move {
+                let result = crate::youtube::resolve(&query).await;
+                let _ = jobs.send(Job::YtResolved(id, result));
+            });
+            return;
+        }
         self.rt.spawn(async move {
             let result = crate::youtube::search(&query, limit).await;
             let _ = jobs.send(Job::YtResults(id, result));
@@ -1454,6 +1543,17 @@ impl App {
         }
         // Named after the file, never replacing an existing playlist.
         let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Imported".into());
+        self.begin_import(stem, rows, |r| format!("https://www.youtube.com/watch?v={}", r.id));
+    }
+
+    /// Makes a playlist named after `stem` (never replacing one) from `rows`:
+    /// songs already in the library are added now, the rest are downloaded
+    /// one by one from `link(row)` and added when all are done.
+    fn begin_import(&mut self, stem: String, rows: Vec<crate::playlist_io::Row>, link: impl Fn(&crate::playlist_io::Row) -> String) {
+        if self.import_job.is_some() {
+            self.error("An import is already running");
+            return;
+        }
         let existing: HashSet<String> = self.playlists().into_iter().collect();
         let name = (1..)
             .map(|n| if n == 1 { stem.clone() } else { format!("{stem} ({n})") })
@@ -1464,7 +1564,7 @@ impl App {
         let pending: VecDeque<String> = rows
             .iter()
             .filter(|r| !r.id.is_empty() && !have.contains(r.id.as_str()) && queued.insert(r.id.clone()))
-            .map(|r| r.id.clone())
+            .map(&link)
             .collect();
         let paths = self.import_paths(&rows);
         let found = paths.len();
@@ -1488,13 +1588,13 @@ impl App {
     fn import_next(&mut self) {
         let Some(job) = &mut self.import_job else { return };
         match job.pending.pop_front() {
-            Some(id) => {
+            Some(link) => {
                 let n = job.total - job.pending.len();
                 let total = job.total;
                 self.info(format!("Importing: downloading {n} of {total}…"));
                 let jobs = self.jobs.clone();
                 self.rt.spawn(async move {
-                    let result = crate::youtube::download(&format!("https://www.youtube.com/watch?v={id}")).await;
+                    let result = crate::youtube::download(&link).await;
                     let _ = jobs.send(Job::ImportDownloaded(result));
                 });
             }

@@ -222,6 +222,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect, p: Pal) {
 fn draw_footer(f: &mut Frame, app: &App, area: Rect, p: Pal) {
     let hints: Vec<(&str, &str)> = match &app.modal {
         Some(Modal::YouTube(d)) if d.typing => vec![("enter", "search"), ("↓", "results"), ("esc", "close")],
+        Some(Modal::YouTube(d)) if d.list_title.is_some() => vec![("enter", "download"), ("A", "download all"), ("/", "new search"), ("esc", "close")],
         Some(Modal::YouTube(_)) => vec![("enter", "download"), ("/", "new search"), ("esc", "close")],
         Some(Modal::Tags(_)) => vec![("↑↓", "field"), ("enter", "save"), ("esc", "cancel")],
         Some(Modal::Settings(_)) => vec![("↑↓", "setting"), ("←→", "change"), ("esc", "close")],
@@ -855,15 +856,16 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect, p: Pal) {
             f.render_widget(Paragraph::new(lines), inner);
         }
         Modal::YouTube(d) => {
-            let h = (d.results.len() as u16 + 6).clamp(9, area.height.saturating_sub(4).max(9));
-            let r = centered(area, 90, h);
+            // Bigger than the other dialogs, with room for a cover preview.
+            let h = (d.results.len() as u16 + 6).clamp(16, area.height.saturating_sub(2).max(9));
+            let r = centered(area, 120, h);
             let inner = dialog(f, r, "Search YouTube", p);
             input_line(f, Rect::new(inner.x, inner.y, inner.width, 1), &d.input, p, d.typing);
             let mut y = inner.y + 2;
             let msg = if d.searching {
                 Some("Searching…".to_string())
             } else if d.message.is_none() && d.results.is_empty() {
-                Some("Type a song or an artist and press Enter. Songs you pick download into your library.".to_string())
+                Some("Type a song or an artist and press Enter, or paste a link to a song, a playlist or an album.".to_string())
             } else {
                 d.message.clone()
             };
@@ -871,7 +873,13 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect, p: Pal) {
                 f.render_widget(Paragraph::new(Span::styled(fit(&m, inner.width as usize), Style::default().fg(p.sub))), Rect::new(inner.x, y, inner.width, 1));
                 y += 1;
             }
-            let rows = Rect::new(inner.x, y, inner.width, inner.bottom().saturating_sub(y));
+            // Preview of the selected result on the right, when there's room.
+            let preview_w: u16 = if inner.width >= 90 && !d.results.is_empty() { 34 } else { 0 };
+            let rows = Rect::new(inner.x, y, inner.width.saturating_sub(preview_w + u16::from(preview_w > 0) * 2), inner.bottom().saturating_sub(y));
+            if preview_w > 0 {
+                let pv = Rect::new(inner.right() - preview_w, y, preview_w, inner.bottom().saturating_sub(y));
+                yt_preview(f, d, pv, p);
+            }
             app.areas.modal_rows = rows;
             let h = rows.height as usize;
             let offset = scroll(app.areas.modal_offset, d.cursor, h, d.results.len());
@@ -1001,6 +1009,49 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect, p: Pal) {
             f.render_widget(Paragraph::new(lines), inner);
         }
     }
+}
+
+/// The selected YouTube result: its cover (16:9), title and details.
+fn yt_preview(f: &mut Frame, d: &crate::app::YtDialog, area: Rect, p: Pal) {
+    let Some(r) = d.results.get(d.cursor) else { return };
+    let w = area.width as usize;
+    // 16:9 in half-block pixels: `area.width` columns by `width·9/32` rows.
+    let img_rows = (area.width as u32 * 9 / 32) as u16;
+    let mut y = area.y;
+    match &d.preview {
+        Some((id, img)) if *id == r.id => {
+            f.render_widget(Paragraph::new(crate::art::half_blocks(img, area.width, img_rows)), Rect::new(area.x, y, area.width, img_rows));
+        }
+        _ => {
+            let blank: Vec<Line> = (0..img_rows).map(|_| Line::from(Span::styled(" ".repeat(w), Style::default().bg(p.surface)))).collect();
+            f.render_widget(Paragraph::new(blank), Rect::new(area.x, y, area.width, img_rows));
+        }
+    }
+    y += img_rows + 1;
+    let mut lines: Vec<Line> = wrap(&r.title, w)
+        .into_iter()
+        .take(3)
+        .map(|l| Line::from(Span::styled(l, Style::default().fg(p.text).add_modifier(Modifier::BOLD))))
+        .collect();
+    let meta = [r.uploader.as_str(), r.duration.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" · ");
+    lines.push(Line::from(Span::styled(fit(&meta, w), Style::default().fg(p.sub))));
+    lines.push(Line::from(""));
+    let state = if d.saved.contains(&r.url) {
+        Span::styled("✓ in your library", Style::default().fg(p.green))
+    } else if d.downloading.contains(&r.url) {
+        Span::styled("downloading…", Style::default().fg(p.sub))
+    } else {
+        Span::styled("enter: download", Style::default().fg(p.accent))
+    };
+    lines.push(Line::from(state));
+    if let Some(list) = &d.list_title {
+        lines.push(Line::from(""));
+        for l in wrap(&format!("From “{list}”: {} songs", d.results.len()), w) {
+            lines.push(Line::from(Span::styled(l, Style::default().fg(p.sub))));
+        }
+        lines.push(Line::from(Span::styled("A: download all into a playlist", Style::default().fg(p.accent))));
+    }
+    f.render_widget(Paragraph::new(lines), Rect::new(area.x, y, area.width, area.bottom().saturating_sub(y)));
 }
 
 #[cfg(test)]
