@@ -2,7 +2,7 @@
 
 <img src="assets/tux.png" width="96" alt="">
 
-# vr_hv1's music client
+# vr_hv1's music player
 
 **A fast, native Linux music player with synced lyrics, furigana, romaji and YouTube downloads,**
 **on your desktop, in a terminal, and on your phone.** It shows up on your desktop as *vr_hv1's Music Player*.
