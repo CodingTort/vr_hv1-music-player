@@ -4,8 +4,8 @@
 
 # vr_hv1's music client
 
-**A fast, native Linux music player with synced lyrics, furigana, romaji and YouTube downloads.**
-It shows up on your desktop as *Tort's Music Player*.
+**A fast, native Linux music player with synced lyrics, furigana, romaji and YouTube downloads,**
+**on your desktop, in a terminal, and on your phone.** It shows up on your desktop as *Tort's Music Player*.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
@@ -28,6 +28,8 @@ Japanese music.
 - [Installation](#installation)
 - [Using it](#using-it)
 - [Keyboard shortcuts](#keyboard-shortcuts)
+- [Terminal client](#terminal-client)
+- [Listen on your phone](#listen-on-your-phone)
 - [Configuration](#configuration)
 - [Desktop integration](#desktop-integration)
 - [Privacy](#privacy)
@@ -75,6 +77,12 @@ Japanese music.
 - **MPRIS2**: works with `playerctl`, Waybar, media keys and desktop widgets.
 - Desktop notifications when the track changes.
 
+**Terminal and phone**
+- **Terminal client** (`lavanda-tui`) with the same library, lyrics, furigana, romaji, YouTube and
+  playlists, album art drawn in the terminal, and mouse/touch support. It fits a phone screen over SSH.
+- **Listen on your phone**: press `o` and the music plays in your phone's browser (lock-screen controls,
+  synced lyrics), reached privately over Tailscale or an SSH tunnel.
+
 ## Quick start (Arch Linux)
 
 ```bash
@@ -93,6 +101,7 @@ make install
 
 Then install the [UDEV Gothic NF](#fonts) font, make sure `~/.local/bin` is on your `PATH`, and launch
 **Tort's Music Player** from your app launcher or run `lavanda`. Your music is read from `~/Music`.
+In a terminal (or over SSH), run `lavanda-tui`.
 
 ## Requirements
 
@@ -131,6 +140,9 @@ Everything below is optional. When a tool is missing, the app keeps working with
 | "Show window" from the tray | Hyprland (`hyprctl`) | — | — | — |
 | Live theme following | [Omarchy](https://omarchy.org) | — | — | — |
 | Command-line control | `playerctl` | `playerctl` | `playerctl` | `playerctl` |
+| [Listening on your phone](#listen-on-your-phone) without an SSH tunnel | [Tailscale](https://tailscale.com) on the computer and the phone | `tailscale` | [tailscale.com/download](https://tailscale.com/download) | `tailscale` |
+| Keeping the terminal client running when SSH disconnects | `tmux` | `tmux` | `tmux` | `tmux` |
+| Phone playback of OGG, Opus and other formats Safari can't play | `ffmpeg` | `ffmpeg` | `ffmpeg` | `ffmpeg` (RPM Fusion) |
 
 ### Fonts
 
@@ -152,7 +164,8 @@ make install          # builds in release mode, installs to ~/.local
 
 | File | Location |
 |---|---|
-| program | `~/.local/bin/lavanda` |
+| desktop app | `~/.local/bin/lavanda` |
+| terminal client | `~/.local/bin/lavanda-tui` |
 | app launcher entry | `~/.local/share/applications/lavanda.desktop` |
 | icon | `~/.local/share/icons/hicolor/{scalable,256x256}/apps/tort-music-player.*` |
 
@@ -208,6 +221,66 @@ background (colour, gradient, image or blurred album cover), cover size and visu
 Mouse: double-click a track to play it, right-click for context menus, `Ctrl+Click` / `Shift+Click` to
 select several.
 
+## Terminal client
+
+![The terminal client: library, songs, and synced lyrics with furigana; album art in the player bar](docs/screenshots/terminal.png)
+
+`lavanda-tui` is the same player for the terminal: it uses the same library, playlists, likes, lyric
+timing fixes and settings as the desktop app (run one of the two at a time). It works in any terminal
+with 24-bit colour, including SSH apps on phones, and adapts to the size of the screen:
+
+- **Wide terminals** show the library, the song list and the lyrics side by side, with the album art,
+  progress and visualiser below.
+- **Narrow ones** (a phone held upright) show one pane at a time: switch with `Tab` or tap the tabs at the top.
+- **`t`** switches to a now-playing view with big album art and the lyrics.
+
+<p align="center"><img src="docs/screenshots/terminal-narrow.png" width="300" alt="The terminal client on a narrow screen: album art, song, progress and lyrics with furigana"></p>
+
+| Key | Action | | Key | Action |
+|---|---|---|---|---|
+| `Space` | play / pause | | `k` | lyrics pane |
+| `n` / `p` | next / previous | | `j` | Japanese ⇄ romaji |
+| `←` / `→` | seek (`Shift`: 30 s) | | `g` | furigana on / off |
+| `+` / `-` | volume | | `[` / `]`, `0` | lyrics earlier / later, reset |
+| `s` / `r` | shuffle / repeat this song | | `S` | sync the selected lyric line to now |
+| `Enter` | play / open artist, album… | | `c` / `a` / `d` | new playlist / add / remove song |
+| `Esc` / `⌫` | back, clear search | | `R` / `D` | rename / delete playlist |
+| `/` | search | | `x` / `i` | export / import playlist (CSV) |
+| `Tab`, `1` `2` `3` | switch pane | | `y` | YouTube search and download |
+| `t` | now-playing view | | `o` | play on your phone ⇄ this computer |
+| `l` | like | | `e` | edit tags |
+| `v` | visualiser | | `,` | settings |
+| `F5` | rescan library | | `?` | all keys |
+
+Mouse and touch: click or tap to select, double-click to play, scroll, click the progress bar to seek,
+click a lyric line to jump to it. Messages the player would print go to `~/.cache/lavanda/tui.log`.
+
+## Listen on your phone
+
+Press `o` in the terminal client and the music moves to your phone: it plays in the phone's browser
+(Safari on an iPhone), with the album art, synced lyrics and lock-screen controls. The terminal client
+stays the remote control, and the page has its own play, pause and skip buttons. Press `o` again to bring
+the music back to the computer at the same spot.
+
+The page is served by the terminal client itself. It listens only on the computer itself and on its
+Tailscale address, never on your other networks, and every link carries a secret key.
+
+**With Tailscale** (recommended): install Tailscale on the computer and the phone, signed in to the same
+account. Press `o` and open the Tailscale link it shows in Safari. Tap **Share › Add to Home Screen** to
+keep it as an app.
+
+**With an SSH tunnel**: connect with a port forward, e.g. `ssh -L 8337:127.0.0.1:8337 you@your-computer`
+(in Termius: *Port Forwarding*, local, 8337 → 127.0.0.1:8337), press `o`, and open the `localhost` link it
+shows. On an iPhone the tunnel stops a short while after you switch away from the SSH app, so Tailscale
+works better there.
+
+**Over SSH, run it inside tmux** (`tmux new -A -s music lavanda-tui`), so the player keeps going when the
+SSH app on your phone is suspended; `tmux attach -t music` brings it back.
+
+Tips: the first song needs a tap (phones don't start sound on their own). With the phone locked, songs
+still move on by themselves and the lock-screen buttons work; commands from the terminal reach the page
+when it's back on screen. `lavanda-tui --phone` starts straight in phone mode.
+
 ## Configuration
 
 Settings are written to `~/.config/lavanda/config.toml` on first launch. Most of them can be changed in
@@ -246,6 +319,9 @@ yt_dlp_format = "mp3"            # any format yt-dlp's --audio-format accepts
 yt_dlp_quality = "128K"
 yt_dlp_output = "%(title)s.%(ext)s"
 yt_search_results = 15
+
+# Terminal client
+phone_port = 8337                # port of the phone player page
 ```
 
 | Data | Where |
@@ -254,6 +330,8 @@ yt_search_results = 15
 | volume, lyrics panel (shown, width, romaji) | `~/.config/lavanda/state.toml` |
 | playlists, likes, play counts, lyric offsets | `~/.config/lavanda/db.json` |
 | downloaded lyrics | `~/.cache/lavanda/lyrics/` |
+| the phone player's secret key (delete it to make a new one) | `~/.config/lavanda/phone-key` |
+| terminal client log; songs converted for the phone | `~/.cache/lavanda/tui.log`, `~/.cache/lavanda/phone/` |
 
 ## Desktop integration
 
@@ -291,7 +369,8 @@ The player works fully offline. It only goes online for these:
 | Search-result thumbnails | the video ID | i.ytimg.com |
 | "Search cover online" in the tag editor (only when you click it) | the album's artist and title | Google Images, in your browser |
 
-Nothing else leaves your computer.
+Nothing else leaves your computer. The phone player (terminal client, `o`) serves your music only on the
+computer itself and its Tailscale address, and only to links that carry its secret key.
 
 ## Known limitations
 
@@ -303,6 +382,11 @@ Nothing else leaves your computer.
 - The prebuilt release needs glibc 2.43 or newer (current Arch-based systems); elsewhere, build from source.
 - "Show window" from the tray works on Hyprland; on other desktops, use your task bar.
 - Seek accuracy depends on the file format, and there is no gapless playback.
+- Run the desktop app or the terminal client, not both: they would both play, and only one gets the
+  media keys.
+- The terminal client's album art needs a terminal with 24-bit colour (almost all have it).
+- Phone playback is controlled from the page and the terminal; while the phone is locked, commands from
+  the terminal wait until the page is on screen again (the lock-screen buttons always work).
 
 ## Project layout
 
@@ -313,6 +397,7 @@ src/
 ├── youtube.rs              yt-dlp search and download
 ├── playlist_io.rs          playlist CSV export / import
 ├── tray.rs                 system tray icon (StatusNotifierItem + dbusmenu)
+├── cover.rs                album covers squared without cropping (shared)
 ├── config.rs, state.rs, persist.rs, locale.rs
 ├── audio/                  decoding and output, spectrum analysis, MPRIS
 ├── library/                library scanner, track model
@@ -320,6 +405,10 @@ src/
     ├── theme.rs, icons.rs
     ├── views/              library, player, focus layout, lyrics panel
     └── components/         lyrics view, visualiser, dialogs, controls
+src/tui/                    the terminal client (a second program sharing the modules above)
+├── main.rs, app.rs         startup, state and behaviour
+├── view.rs, input.rs, art.rs   drawing, keys and mouse, album art in the terminal
+└── phone.rs, phone.html    the phone player: small web server and the page
 assets/                     icon (Tux) and desktop entry
 ```
 
@@ -335,7 +424,7 @@ the [changelog](CHANGELOG.md).
 - Lyrics from [**LRCLIB**](https://lrclib.net), a free and open lyrics database.
 - Japanese readings by [**MeCab**](https://taku910.github.io/mecab/) and [**KAKASI**](http://kakasi.namazu.org/).
 - Downloads by [**yt-dlp**](https://github.com/yt-dlp/yt-dlp). Font: [**UDEV Gothic**](https://github.com/yuru7/udev-gothic) by Yuko Otawara.
-- Built with [iced](https://iced.rs), [Symphonia](https://github.com/pdeljanov/Symphonia), [cpal](https://github.com/RustAudio/cpal), [lofty](https://github.com/Serial-ATA/lofty-rs) and [zbus](https://github.com/dbus2/zbus).
+- Built with [iced](https://iced.rs), [ratatui](https://ratatui.rs), [Symphonia](https://github.com/pdeljanov/Symphonia), [cpal](https://github.com/RustAudio/cpal), [lofty](https://github.com/Serial-ATA/lofty-rs) and [zbus](https://github.com/dbus2/zbus).
 
 Please only download music you have the right to download.
 

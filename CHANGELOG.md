@@ -4,6 +4,25 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-20
+
+### Added
+
+- **Terminal client** (`lavanda-tui`), rebuilt on the desktop app's code: library by songs, artists,
+  albums, genres, liked, recently and most played, and playlists; search; synced lyrics with timing
+  fixes, the Japanese ⇄ romaji switch and furigana; YouTube search and download; playlists (create, add,
+  remove, rename, delete, CSV export and import); tag editing; settings and themes (including the live
+  Omarchy theme); album art drawn in the terminal; visualiser; media keys and notifications; mouse and
+  touch; a layout that fits a phone screen over SSH. `make install` installs it next to the desktop app.
+- **Listen on your phone**: `o` in the terminal client moves playback to a page in the phone's browser,
+  with album art, synced lyrics and lock-screen controls, reached over Tailscale or an SSH tunnel and
+  protected by a secret key. Formats Safari can't play are converted with ffmpeg.
+- `phone_port` setting.
+
+### Changed
+
+- Album-cover squaring moved to a shared module (`src/cover.rs`), used by both programs.
+
 ## [1.1.1] - 2026-11-20
 
 ### Fixed
@@ -58,5 +77,6 @@ The first release of this fork, based on [lavanda](https://github.com/sheep-farm
 - Lyrics uploads with a translation woven in highlighted the translation.
 - Leftover `notify-send` processes piled up.
 
+[1.2.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.2.0
 [1.1.1]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.1
 [1.1.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.0

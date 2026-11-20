@@ -17,12 +17,14 @@ Please don't paste song lyrics into issues. The title and artist are enough to r
 Install the [build requirements](README.md#to-build), then:
 
 ```bash
-make            # release build
+make            # release build of both programs
 make test       # run the tests
-make run        # build and start the player
+make run        # build and start the desktop app
+make run-tui    # build and start the terminal client
 ```
 
-`cargo build` gives a faster debug build while you work.
+`cargo build` gives a faster debug build while you work. The terminal client (`src/tui/`) includes the
+desktop app's modules with `#[path]`, so a change there is compiled into both programs: build both.
 
 ## Pull requests
 
@@ -38,4 +40,5 @@ make run        # build and start the player
 
 See [Project layout](README.md#project-layout) in the README. In short: `lyrics.rs` holds lyric lookup
 and Japanese text handling, `ui/components/lyrics.rs` is the lyrics widget, `youtube.rs` drives yt-dlp,
-and `app.rs` ties the application together.
+and `app.rs` ties the application together. The terminal client lives in `src/tui/`; its phone player
+is `phone.rs` (server) and `phone.html` (page).
