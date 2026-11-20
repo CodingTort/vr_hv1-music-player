@@ -142,7 +142,7 @@ fn plain_lines(text: &str) -> Option<Vec<LyricLine>> {
     for raw in text.lines() {
         let text = raw.trim().to_string();
         // Keep single blank lines between stanzas, drop runs of them.
-        if text.is_empty() && lines.last().map_or(true, |l| l.text.is_empty()) {
+        if text.is_empty() && lines.last().is_none_or(|l| l.text.is_empty()) {
             continue;
         }
         lines.push(LyricLine { time: Duration::ZERO, text });

@@ -16,6 +16,11 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue, StructureBuilder, Value};
 
 use crate::audio::mpris::APP_NAME;
 
+/// StatusNotifierItem tooltip: (icon name, icon pixmaps (w, h, ARGB), title, text).
+type ToolTip = (String, Vec<(i32, i32, Vec<u8>)>, String, String);
+/// dbusmenu layout node: (id, properties, children).
+type MenuLayout = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
+
 #[derive(Debug, Clone, Copy)]
 pub enum TrayCommand {
     ShowWindow,
@@ -147,7 +152,7 @@ impl Item {
 
     /// (icon name, icon pixmaps, title, text).
     #[zbus(property)]
-    fn tool_tip(&self) -> (String, Vec<(i32, i32, Vec<u8>)>, String, String) {
+    fn tool_tip(&self) -> ToolTip {
         (String::new(), Vec::new(), APP_NAME.to_string(), self.song.clone())
     }
 
@@ -240,7 +245,7 @@ impl Menu {
         parent_id: i32,
         _recursion_depth: i32,
         _property_names: Vec<String>,
-    ) -> zbus::fdo::Result<(u32, (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>))> {
+    ) -> zbus::fdo::Result<(u32, MenuLayout)> {
         let children = if parent_id == 0 {
             MENU.iter().map(|(id, ..)| layout_item(*id)).collect::<zbus::fdo::Result<Vec<_>>>()?
         } else {

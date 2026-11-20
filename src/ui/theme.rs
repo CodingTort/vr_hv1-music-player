@@ -313,6 +313,11 @@ fn parse_hex_str(s: &str) -> Option<Color> {
         return None;
     }
     let hex_stripped = s.strip_prefix('#').unwrap_or(s);
+    // Hex digits only: the slicing below is by bytes, and text typed into
+    // the Settings colour fields can hold any character.
+    if !hex_stripped.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
     let bytes = hex_stripped.as_bytes();
     match bytes.len() {
         6 => {
@@ -589,5 +594,18 @@ pub fn cover_frame(radius: f32) -> impl Fn(&iced::Theme) -> container::Style {
             blur_radius: 16.0,
         },
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn colour_text_with_non_ascii_letters_is_rejected_not_a_crash() {
+        // Typed into the Settings colour field one keystroke at a time.
+        for typed in ["éa", "#éa", "aéé", "#aéé", "ééé", "#12345é"] {
+            assert_eq!(super::parse_hex_str(typed), None, "{typed}");
+        }
+        assert!(super::parse_hex_str("#11111b").is_some());
+        assert!(super::parse_hex_str("fff").is_some());
     }
 }

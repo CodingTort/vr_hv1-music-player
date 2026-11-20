@@ -4,6 +4,7 @@ use iced::{Alignment, Element, Length};
 use crate::app::Message;
 use crate::ui::{icons, theme};
 
+#[allow(clippy::too_many_arguments)] // one argument per setting shown
 pub fn view<'a>(
     theme_mode: &'a str,
     theme_preset: &'a str,

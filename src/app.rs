@@ -1792,8 +1792,7 @@ impl AppState {
 
             Message::SearchCoverOnline => {
                 if let Some(ref s) = self.show_tag_editor {
-                    let q = format!("{} {} album art", s.artist, s.album)
-                        .chars().map(|c| if c == ' ' { '+' } else { c }).collect::<String>();
+                    let q = url_encode(&format!("{} {} album art", s.artist, s.album));
                     let url = format!("https://www.google.com/search?q={}&tbm=isch", q);
                     spawn_detached(std::process::Command::new("xdg-open").arg(url));
                 }
@@ -3200,6 +3199,20 @@ fn rounded_cover(bytes: &[u8], radius: f32) -> Option<iced::widget::image::Handl
     Some(iced::widget::image::Handle::from_rgba(SIZE, SIZE, px.into_raw()))
 }
 
+/// Percent-encodes `text` for a URL query (`&`, `#`, `/`, … in names
+/// would otherwise cut the query short). Spaces become `+`.
+fn url_encode(text: &str) -> String {
+    let mut out = String::new();
+    for b in text.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// Fits a cover into a square without cutting it up. Covers from YouTube are
 /// 16:9 thumbnails: either square artwork between flat bars (the bars are
 /// trimmed off), or a full-width picture, which is shown whole over a
@@ -3329,6 +3342,9 @@ impl CoverTone {
         };
         let mut ranked = colours.clone();
         ranked.sort_by(|a, b| vivid(b).total_cmp(&vivid(a)));
+        if ranked.is_empty() {
+            return CoverTone { luminance: 0.0, accent: iced::Color::WHITE };
+        }
         let top = &ranked[..(ranked.len() / 10).max(1)];
         let sum = top.iter().fold([0.0; 3], |s, c| [s[0] + c[0], s[1] + c[1], s[2] + c[2]]);
         let n = top.len() as f32;
@@ -3440,6 +3456,12 @@ pub fn run() -> iced::Result {
 mod tests {
     use super::CoverTone;
     use iced::Color;
+
+    #[test]
+    fn url_encoding_keeps_the_whole_query() {
+        assert_eq!(super::url_encode("AC/DC & Friends #1"), "AC%2FDC+%26+Friends+%231");
+        assert_eq!(super::url_encode("夜"), "%E5%A4%9C");
+    }
 
     #[test]
     fn square_art_between_bars_is_trimmed() {

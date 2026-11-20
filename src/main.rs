@@ -15,18 +15,19 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LICENSE: &str = include_str!("../LICENSE");
 
 fn main() -> iced::Result {
-    for arg in std::env::args().skip(1) {
+    // Only the first argument matters: every option prints and exits.
+    if let Some(arg) = std::env::args().nth(1) {
         match arg.as_str() {
             "--version" | "-V" => {
                 println!("lavanda {VERSION}");
                 std::process::exit(0);
             }
             "--about" => {
-                println!("lavanda {VERSION}");
-                println!("Native Wayland music player written in Rust.");
-                println!("Built for Omarchy / Hyprland. Follows the active theme live.");
+                println!("{} {VERSION}", audio::mpris::APP_NAME);
+                println!("Native Linux music player with synced lyrics, furigana and romaji,");
+                println!("and YouTube downloads. A fork of lavanda (github.com/sheep-farm/lavanda).");
                 println!();
-                println!("Repository : https://github.com/sheep-farm/lavanda");
+                println!("Repository : https://github.com/CodingTort/vr_hv1-s-music-client");
                 println!("License    : MIT");
                 std::process::exit(0);
             }
@@ -35,8 +36,8 @@ fn main() -> iced::Result {
                 std::process::exit(0);
             }
             "--help" | "-h" => {
-                println!("lavanda {VERSION}");
-                println!("Native Wayland music player for Omarchy / Hyprland.");
+                println!("{} {VERSION}", audio::mpris::APP_NAME);
+                println!("Native Linux music player with synced lyrics.");
                 println!();
                 println!("USAGE:");
                 println!("    lavanda [OPTIONS]");
@@ -44,7 +45,7 @@ fn main() -> iced::Result {
                 println!("OPTIONS:");
                 println!("    -h, --help       Print this help message");
                 println!("    -V, --version    Print version");
-                println!("        --about      About lavanda");
+                println!("        --about      About this program");
                 println!("        --license    Print the MIT license");
                 println!();
                 println!("CONFIG:  ~/.config/lavanda/config.toml");
