@@ -4,6 +4,12 @@
 # keeps playing when an SSH connection drops (e.g. a phone's SSH app being
 # suspended). Without tmux, it just runs the player.
 
+# tmux turns 24-bit colours (album art, themes) into a 256-colour palette
+# unless it knows the terminal can show them, and over SSH nothing tells it.
+# Almost every terminal today can, including phone SSH apps.
+: "${COLORTERM:=truecolor}"
+export COLORTERM
+
 if ! command -v tmux >/dev/null 2>&1; then
     exec vrmusic-tui "$@"
 fi

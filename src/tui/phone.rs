@@ -369,6 +369,24 @@ fn check_code(ctx: &Ctx, typed: &str) -> CodeCheck {
     CodeCheck::Wrong
 }
 
+/// The page in the player's colours (your Omarchy theme or the preset).
+fn themed(page: &str) -> String {
+    use crate::theme;
+    let hex = |c: iced::Color| {
+        let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
+    };
+    let bg = hex(theme::base());
+    let vars = format!(
+        "<style id=\"theme\">:root {{ --bg: {bg}; --text: {}; --dim: {}; --accent: {}; --bad: {}; }}</style>",
+        hex(theme::text()),
+        hex(theme::subtext()),
+        hex(theme::accent()),
+        hex(theme::red()),
+    );
+    page.replace("<style id=\"theme\"></style>", &vars).replace("content=\"#14121c\"", &format!("content=\"{bg}\""))
+}
+
 /// Compares in time independent of where the strings differ.
 fn same_key(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
@@ -398,7 +416,7 @@ async fn handle(mut sock: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
             // Without the key: the page asking for the pairing code.
             ("GET", "/") => {
                 let headers = [("Content-Type", "text/html; charset=utf-8".into()), ("Cache-Control", "no-store".into())];
-                respond(&mut sock, "200 OK", &headers, PAIR_PAGE.as_bytes()).await
+                respond(&mut sock, "200 OK", &headers, themed(PAIR_PAGE).as_bytes()).await
             }
             ("GET", "/pair") => {
                 let typed: String = req.query.get("code").map(|c| c.chars().filter(char::is_ascii_digit).collect()).unwrap_or_default();
@@ -418,7 +436,7 @@ async fn handle(mut sock: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
     match (req.method.as_str(), segments.as_slice()) {
         ("GET", [""]) => {
             let headers = [("Content-Type", "text/html; charset=utf-8".into()), ("Cache-Control", "no-store".into()), ("Referrer-Policy", "no-referrer".into())];
-            respond(&mut sock, "200 OK", &headers, PAGE.as_bytes()).await
+            respond(&mut sock, "200 OK", &headers, themed(PAGE).as_bytes()).await
         }
         ("GET", ["events"]) => events(sock, ctx).await,
         ("GET", ["audio", id]) => {

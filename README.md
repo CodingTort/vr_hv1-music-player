@@ -234,8 +234,6 @@ with 24-bit colour, including SSH apps on phones, and adapts to the size of the 
 - **Narrow ones** (a phone held upright) show one pane at a time: switch with `Tab` or tap the tabs at the top.
 - **`t`** switches to a now-playing view with big album art and the lyrics.
 
-<p align="center"><img src="docs/screenshots/terminal-narrow.png" width="300" alt="The terminal client on a narrow screen: album art, song, progress and lyrics with furigana"></p>
-
 | Key | Action | | Key | Action |
 |---|---|---|---|---|
 | `Space` | play / pause | | `k` | lyrics pane |
@@ -257,8 +255,10 @@ click a lyric line to jump to it. Messages the player would print go to `~/.cach
 
 ## Listen on your phone
 
+<p align="center"><img src="docs/screenshots/phone.png" width="560" alt="On an iPhone: vrmusic in an SSH app (now-playing view with furigana) and the phone player in Safari, playing the same song with synced lyrics"></p>
+
 Press `o` in the terminal client and the music moves to your phone: it plays in the phone's browser
-(Safari on an iPhone), with the album art, synced lyrics and lock-screen controls. The terminal client
+(Safari on an iPhone), with the album art, synced lyrics and lock-screen controls, in the player's theme. The terminal client
 stays the remote control, and the page has its own play, pause and skip buttons. Press `o` again to bring
 the music back to the computer at the same spot.
 

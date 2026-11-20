@@ -4,6 +4,22 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-20
+
+### Fixed
+
+- Through `vrmusic`, tmux showed the terminal client in 256 colours (posterised album art and theme)
+  when the terminal didn't announce 24-bit colour, as over SSH. `vrmusic` now tells tmux it can.
+- The phone player's lyrics box scrolled past the line being sung, leaving it out of view.
+- The phone player showed a broken image for songs without a cover; it shows the app icon now.
+- Settings and window state were saved with float noise (`volume = 0.800000011920929`); they're saved
+  as written now (`volume = 0.8`).
+
+### Changed
+
+- The phone player's pages use the player's colours (your Omarchy theme or the chosen preset).
+- Screenshots in the Tokyo Night theme, and an accurate picture of the iPhone setup.
+
 ## [1.2.0] - 2026-11-20
 
 ### Added
@@ -84,6 +100,7 @@ The first release of this fork, based on [lavanda](https://github.com/sheep-farm
 - Lyrics uploads with a translation woven in highlighted the translation.
 - Leftover `notify-send` processes piled up.
 
+[1.2.1]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.2.1
 [1.2.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.2.0
 [1.1.1]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.1
 [1.1.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.0
