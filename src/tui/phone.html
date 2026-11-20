@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Music">
+<meta name="theme-color" content="#14121c">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Tort's Music Player</title>
+<style>
+  :root { --bg: #14121c; --text: #ece8f6; --dim: #a59fb8; --accent: #c4a7ff; --card: rgba(255,255,255,.07); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans CJK JP", sans-serif; }
+  #backdrop { position: fixed; inset: -40px; background-size: cover; background-position: center;
+    filter: blur(40px) brightness(.45) saturate(1.3); transform: scale(1.1); transition: background-image .6s; }
+  main { position: relative; max-width: 560px; margin: 0 auto; min-height: 100%;
+    padding: max(16px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 14px; }
+  header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--dim); }
+  #dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e0647a; margin-right: 6px; vertical-align: 1px; }
+  #dot.on { background: #8bd5a0; }
+  #cover { width: min(72vw, 320px); aspect-ratio: 1; margin: 4px auto 0; border-radius: 18px; object-fit: cover;
+    background: var(--card); box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+  .meta { text-align: center; }
+  #title { font-size: 21px; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+  #artist { color: var(--dim); margin: 2px 0 0; overflow-wrap: anywhere; }
+  .bar { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1; accent-color: var(--accent); height: 28px; }
+  .controls { display: flex; justify-content: center; align-items: center; gap: 34px; }
+  button { background: none; border: 0; color: var(--text); padding: 6px; cursor: pointer; }
+  button svg { width: 34px; height: 34px; fill: currentColor; }
+  #play svg { width: 58px; height: 58px; }
+  #lyrics { flex: 1; min-height: 160px; max-height: 42vh; overflow-y: auto; padding: 8px 4px 40vh;
+    background: var(--card); border-radius: 16px; scroll-behavior: smooth; }
+  #lyrics p { margin: 0; padding: 7px 14px; font-size: 18px; font-weight: 600; color: rgba(236,232,246,.38);
+    transition: color .25s, transform .25s; transform-origin: left center; }
+  #lyrics p.now { color: var(--text); transform: scale(1.03); }
+  #lyrics.plain p { color: var(--text); font-weight: 500; }
+  #lyrics .note { text-align: center; color: var(--dim); font-weight: 500; padding-top: 30px; }
+  #tap { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
+    gap: 12px; background: rgba(10,8,16,.82); z-index: 5; font-size: 18px; text-align: center; padding: 30px; }
+  #tap.show { display: flex; }
+  #tap b { font-size: 64px; color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="backdrop"></div>
+<main>
+  <header><span><span id="dot"></span><span id="conn">Connecting…</span></span><span>Tort's Music Player</span></header>
+  <img id="cover" alt="">
+  <div class="meta"><p id="title">Nothing playing</p><p id="artist">Choose a song in the terminal client</p></div>
+  <div class="bar"><span id="pos">0:00</span><input id="seek" type="range" min="0" max="1" step="0.1" value="0"><span id="dur">0:00</span></div>
+  <div class="controls">
+    <button id="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+    <button id="play" aria-label="Play"><svg viewBox="0 0 24 24"><path id="playicon" d="M8 5v14l11-7z"/></svg></button>
+    <button id="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+  </div>
+  <div id="lyrics"><p class="note">Lyrics appear here</p></div>
+</main>
+<div id="tap"><b>▶</b><span id="tapmsg">Tap to start listening</span></div>
+<audio id="audio" preload="auto" playsinline></audio>
+<script>
+"use strict";
+const key = new URLSearchParams(location.search).get("k") || "";
+const $ = (id) => document.getElementById(id);
+const audio = $("audio");
+const PLAY = "M8 5v14l11-7z", PAUSE = "M6 5h4v14H6zm8 0h4v14h-4z";
+
+let state = null;          // last state from the computer
+let loaded = null;         // id of the song in the <audio> element
+let lastCmd = null;        // number of the last command applied
+let wantPlay = false;      // play once allowed (iOS needs a tap first)
+let pendingSeek = 0;
+let lyrics = { id: null, synced: false, lines: [] };
+let lyricIdx = -1;
+let seeking = false;
+
+const url = (path, params = {}) => {
+  const q = new URLSearchParams({ k: key, ...params });
+  return `${path}?${q}`;
+};
+const post = (path, params) => fetch(url(path, params), { method: "POST", keepalive: true }).catch(() => {});
+const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
+function showTap(msg) { $("tapmsg").textContent = msg || "Tap to start listening"; $("tap").classList.add("show"); }
+function hideTap() { $("tap").classList.remove("show"); }
+
+function tryPlay() {
+  wantPlay = true;
+  const p = audio.play();
+  if (p) p.then(hideTap).catch(() => showTap());
+}
+
+function load(id, at, play) {
+  if (id == null) return;
+  if (loaded === id && audio.src) {
+    audio.currentTime = at || 0;
+  } else {
+    loaded = id;
+    pendingSeek = at || 0;
+    audio.src = url(`audio/${id}`);
+    audio.load();
+    const track = state && state.track && state.track.id === id ? state.track : null;
+    showTrack(track, id);
+  }
+  if (play) tryPlay(); else { wantPlay = false; audio.pause(); }
+}
+
+function showTrack(track, id) {
+  $("title").textContent = track ? track.title : "Loading…";
+  $("artist").textContent = track ? [track.artist, track.album].filter(Boolean).join(" — ") : "";
+  const cover = url(`cover/${id}`);
+  $("cover").src = cover;
+  $("backdrop").style.backgroundImage = `url("${cover}")`;
+  if ("mediaSession" in navigator && track) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title, artist: track.artist, album: track.album,
+      artwork: [{ src: new URL(cover, location.href).href, sizes: "512x512" }],
+    });
+  }
+}
+
+function applyState(st) {
+  const first = state === null;
+  state = st;
+  $("dot").classList.add("on");
+  if (!st.active) {
+    $("conn").textContent = "Playing on the computer";
+    if (!audio.paused) audio.pause();
+    hideTap();
+  } else {
+    $("conn").textContent = "Connected";
+  }
+  if (first) {
+    lastCmd = st.cmd.n;     // don't replay commands sent before this page opened
+    if (st.active && st.track) {
+      load(st.track.id, st.at || 0, false);
+      if (st.playing) showTap();
+    }
+    return;
+  }
+  if (st.cmd.n !== lastCmd) {
+    lastCmd = st.cmd.n;
+    const c = st.cmd.do || {};
+    if (c.kind === "load" && st.track) load(st.track.id, c.at, c.play);
+    else if (c.kind === "play") tryPlay();
+    else if (c.kind === "pause") { wantPlay = false; audio.pause(); }
+    else if (c.kind === "seek") audio.currentTime = c.at;
+    else if (c.kind === "release") { wantPlay = false; audio.pause(); }
+  }
+  if (st.active && st.track && st.track.id !== loaded) load(st.track.id, 0, st.playing);
+  if (st.track && st.track.id === loaded) showTrack(st.track, loaded);
+}
+
+function applyLyrics(ly) {
+  lyrics = ly;
+  lyricIdx = -1;
+  const box = $("lyrics");
+  box.innerHTML = "";
+  box.classList.toggle("plain", !ly.synced);
+  if (!ly.lines.length) {
+    box.innerHTML = '<p class="note">No lyrics for this song</p>';
+    return;
+  }
+  ly.lines.forEach(([t, text], i) => {
+    const p = document.createElement("p");
+    p.textContent = text.trim() ? text : "♪";
+    if (ly.synced) p.onclick = () => { audio.currentTime = Math.max(0, t); report(); };
+    box.appendChild(p);
+  });
+  box.scrollTop = 0;
+}
+
+function followLyrics() {
+  if (!lyrics.synced || lyrics.id !== loaded) return;
+  const t = audio.currentTime;
+  let i = -1;
+  for (let j = 0; j < lyrics.lines.length; j++) { if (lyrics.lines[j][0] <= t) i = j; else break; }
+  if (i === lyricIdx) return;
+  const ps = $("lyrics").children;
+  if (ps[lyricIdx]) ps[lyricIdx].classList.remove("now");
+  lyricIdx = i;
+  if (ps[i]) {
+    ps[i].classList.add("now");
+    const box = $("lyrics");
+    box.scrollTop = ps[i].offsetTop - box.clientHeight / 3;
+  }
+}
+
+function report() {
+  if (state && state.active && loaded != null) {
+    post("report", { id: loaded, t: audio.currentTime.toFixed(2), p: audio.paused ? 0 : 1 });
+  }
+}
+
+// Plays the song the computer said comes next, right away: when the screen
+// is locked the event stream may be paused, but this still works.
+function advance(useSkip) {
+  const id = loaded;
+  const next = state && (useSkip ? state.skip : state.next);
+  if (next != null) load(next, 0, true);
+  post("ended", { id, next: next ?? "" });
+}
+
+audio.addEventListener("loadedmetadata", () => {
+  if (pendingSeek > 0) { audio.currentTime = pendingSeek; pendingSeek = 0; }
+  $("seek").max = audio.duration || 1;
+  $("dur").textContent = fmt(audio.duration);
+});
+audio.addEventListener("timeupdate", () => {
+  if (!seeking) $("seek").value = audio.currentTime;
+  $("pos").textContent = fmt(audio.currentTime);
+  followLyrics();
+});
+audio.addEventListener("play", () => { $("playicon").setAttribute("d", PAUSE); report(); });
+audio.addEventListener("pause", () => { $("playicon").setAttribute("d", PLAY); report(); });
+audio.addEventListener("seeked", report);
+audio.addEventListener("ended", () => advance(false));
+audio.addEventListener("error", () => { $("artist").textContent = "This song couldn't be played on the phone"; });
+
+$("tap").onclick = () => { hideTap(); tryPlay(); };
+$("play").onclick = () => {
+  if (audio.paused) { tryPlay(); post("cmd", { c: "play" }); }
+  else { wantPlay = false; audio.pause(); post("cmd", { c: "pause" }); }
+};
+$("next").onclick = () => advance(true);
+$("prev").onclick = () => {
+  if (audio.currentTime > 3) { audio.currentTime = 0; report(); }
+  else post("cmd", { c: "prev" });
+};
+$("seek").addEventListener("input", () => { seeking = true; $("pos").textContent = fmt($("seek").value); });
+$("seek").addEventListener("change", () => { audio.currentTime = Number($("seek").value); seeking = false; report(); });
+
+if ("mediaSession" in navigator) {
+  const ms = navigator.mediaSession;
+  ms.setActionHandler("play", () => { tryPlay(); post("cmd", { c: "play" }); });
+  ms.setActionHandler("pause", () => { audio.pause(); post("cmd", { c: "pause" }); });
+  ms.setActionHandler("nexttrack", () => advance(true));
+  ms.setActionHandler("previoustrack", () => $("prev").onclick());
+  try { ms.setActionHandler("seekto", (e) => { audio.currentTime = e.seekTime; report(); }); } catch (_) {}
+}
+
+setInterval(report, 2000);
+
+function connect() {
+  const es = new EventSource(url("events"));
+  es.addEventListener("state", (e) => applyState(JSON.parse(e.data)));
+  es.addEventListener("lyrics", (e) => applyLyrics(JSON.parse(e.data)));
+  es.onerror = () => { $("dot").classList.remove("on"); $("conn").textContent = "Reconnecting…"; };
+}
+if (!key) showTap("This link is missing its key. Open the link shown by lavanda-tui (press o).");
+else connect();
+</script>
+</body>
+</html>

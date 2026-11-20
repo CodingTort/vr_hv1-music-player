@@ -1,9 +1,9 @@
 [package]
 name = "lavanda"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.89"
-description = "Tort's Music Player: a native Linux music player with synced lyrics, furigana, romaji and YouTube downloads (a lavanda fork)"
+description = "Tort's Music Player: a native Linux music player with synced lyrics, furigana, romaji and YouTube downloads, a terminal client, and playback on your phone (a lavanda fork)"
 license = "MIT"
 repository = "https://github.com/CodingTort/vr_hv1-s-music-client"
 readme = "README.md"
@@ -60,6 +60,18 @@ serde_json = "1"
 
 # Data/hora (recently played)
 chrono = { version = "0.4", features = ["serde"] }
+
+# Terminal client (lavanda-tui): terminal UI, wide-character widths, and the
+# request parser for the phone player's small HTTP server.
+ratatui = "0.30"
+unicode-width = "0.2"
+httparse = "1"
+libc = "0.2"
+
+# The GUI (src/main.rs) is found automatically.
+[[bin]]
+name = "lavanda-tui"
+path = "src/tui/main.rs"
 
 [profile.release]
 opt-level = "z"

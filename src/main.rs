@@ -1,6 +1,7 @@
 mod app;
 mod audio;
 mod config;
+mod cover;
 mod library;
 mod locale;
 mod lyrics;

@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 const OUTPUT_RATE: u32 = 48000;
 const OUTPUT_CHANNELS: u16 = 2;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlaybackState {
     Stopped,
     Playing,
