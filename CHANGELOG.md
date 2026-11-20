@@ -8,7 +8,7 @@ All notable changes to this project. The format follows
 
 ### Added
 
-- **Terminal client** (`lavanda-tui`), rebuilt on the desktop app's code: library by songs, artists,
+- **Terminal client** (`vrmusic-tui`), rebuilt on the desktop app's code: library by songs, artists,
   albums, genres, liked, recently and most played, and playlists; search; synced lyrics with timing
   fixes, the Japanese ⇄ romaji switch and furigana; YouTube search and download; playlists (create, add,
   remove, rename, delete, CSV export and import); tag editing; settings and themes (including the live
@@ -19,9 +19,14 @@ All notable changes to this project. The format follows
   protected by a secret key. The phone connects with a short address and a 6-digit code instead of a
   long link (which phone terminals cut off when they wrap it). Formats Safari can't play are converted
   with ffmpeg.
+- `vrmusic`: starts the terminal client inside tmux (or returns to it), so it keeps playing when an SSH
+  connection drops; without tmux it just runs the client.
 - `phone_port` setting.
 
 ### Changed
+
+- Shown as **vr_hv1's Music Player** (window, header, notifications, media controls, phone page).
+  The desktop program stays `lavanda`, as do its config directory and MPRIS name.
 
 - Album-cover squaring moved to a shared module (`src/cover.rs`), used by both programs.
 

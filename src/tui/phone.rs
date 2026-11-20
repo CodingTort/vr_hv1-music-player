@@ -410,7 +410,7 @@ async fn handle(mut sock: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
                 };
                 respond(&mut sock, "303 See Other", &[("Location", to), ("Cache-Control", "no-store".into())], b"").await
             }
-            _ => respond(&mut sock, "403 Forbidden", &[("Content-Type", "text/plain".into())], b"This needs the player's key: open the address shown by lavanda-tui.").await,
+            _ => respond(&mut sock, "403 Forbidden", &[("Content-Type", "text/plain".into())], b"This needs the player's key: open the address shown by the terminal player (vrmusic).").await,
         };
     }
 

@@ -1,4 +1,4 @@
-//! lavanda-tui: the terminal client of Tort's Music Player.
+//! vrmusic-tui: the terminal client of vr_hv1's Music Player (`vrmusic` runs it in tmux).
 //!
 //! Shares the GUI's code (audio engine, library, lyrics, YouTube, playlists,
 //! themes) and its settings and library data in `~/.config/lavanda`. Over SSH
@@ -59,7 +59,7 @@ fn main() -> io::Result<()> {
     if let Some(arg) = std::env::args().nth(1) {
         match arg.as_str() {
             "--version" | "-V" => {
-                println!("lavanda-tui {VERSION}");
+                println!("vrmusic-tui {VERSION}");
                 return Ok(());
             }
             "--phone" => start_on_phone = true,
@@ -68,7 +68,7 @@ fn main() -> io::Result<()> {
                 println!("Music player for the terminal, with synced lyrics and phone playback.");
                 println!();
                 println!("USAGE:");
-                println!("    lavanda-tui [--phone]");
+                println!("    vrmusic-tui [--phone]      (or `vrmusic`, which runs it inside tmux)");
                 println!();
                 println!("OPTIONS:");
                 println!("        --phone      Start with the music playing on your phone");
@@ -80,8 +80,8 @@ fn main() -> io::Result<()> {
                 return Ok(());
             }
             other => {
-                eprintln!("lavanda-tui: unknown option '{other}'");
-                eprintln!("Try 'lavanda-tui --help'.");
+                eprintln!("vrmusic-tui: unknown option '{other}'");
+                eprintln!("Try 'vrmusic-tui --help'.");
                 std::process::exit(1);
             }
         }

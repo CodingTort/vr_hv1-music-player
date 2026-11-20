@@ -1,0 +1,15 @@
+#!/bin/sh
+# vrmusic: opens the terminal player (vrmusic-tui) in a tmux session called
+# "music", or goes back to it if it's already running. Inside tmux the music
+# keeps playing when an SSH connection drops (e.g. a phone's SSH app being
+# suspended). Without tmux, it just runs the player.
+
+if ! command -v tmux >/dev/null 2>&1; then
+    exec vrmusic-tui "$@"
+fi
+if [ -n "$TMUX" ]; then
+    # Already in tmux: switch to the session rather than nest one.
+    tmux has-session -t music 2>/dev/null || tmux new-session -d -s music vrmusic-tui "$@"
+    exec tmux switch-client -t music
+fi
+exec tmux new-session -A -s music vrmusic-tui "$@"

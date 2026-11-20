@@ -20,7 +20,7 @@ Install the [build requirements](README.md#to-build), then:
 make            # release build of both programs
 make test       # run the tests
 make run        # build and start the desktop app
-make run-tui    # build and start the terminal client
+make run-tui    # build and start the terminal client (vrmusic-tui)
 ```
 
 `cargo build` gives a faster debug build while you work. The terminal client (`src/tui/`) includes the

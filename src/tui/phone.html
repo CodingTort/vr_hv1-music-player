@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Music">
 <meta name="theme-color" content="#14121c">
 <link rel="apple-touch-icon" href="icon.png">
-<title>Tort's Music Player</title>
+<title>vr_hv1's Music Player</title>
 <style>
   :root { --bg: #14121c; --text: #ece8f6; --dim: #a59fb8; --accent: #c4a7ff; --card: rgba(255,255,255,.07); }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -49,7 +49,7 @@
 <body>
 <div id="backdrop"></div>
 <main>
-  <header><span><span id="dot"></span><span id="conn">Connecting…</span></span><span>Tort's Music Player</span></header>
+  <header><span><span id="dot"></span><span id="conn">Connecting…</span></span><span>vr_hv1's Music Player</span></header>
   <img id="cover" alt="">
   <div class="meta"><p id="title">Nothing playing</p><p id="artist">Choose a song in the terminal client</p></div>
   <div class="bar"><span id="pos">0:00</span><input id="seek" type="range" min="0" max="1" step="0.1" value="0"><span id="dur">0:00</span></div>
@@ -251,7 +251,7 @@ function connect() {
   es.addEventListener("lyrics", (e) => applyLyrics(JSON.parse(e.data)));
   es.onerror = () => { $("dot").classList.remove("on"); $("conn").textContent = "Reconnecting…"; };
 }
-if (!key) showTap("This link is missing its key. Open the link shown by lavanda-tui (press o).");
+if (!key) showTap("This link is missing its key. Press o in the terminal player (vrmusic) and open the address it shows.");
 else connect();
 </script>
 </body>

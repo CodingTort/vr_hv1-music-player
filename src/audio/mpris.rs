@@ -27,9 +27,9 @@ pub enum MprisUpdate {
 }
 
 /// The player's display name: window title, header, notifications and the
-/// MPRIS identity. Defined here, not in app.rs, because lavanda-tui compiles
+/// MPRIS identity. Defined here, not in app.rs, because the terminal client compiles
 /// this file too. (The MPRIS bus name stays `lavanda` for playerctl.)
-pub const APP_NAME: &str = "Tort's Music Player";
+pub const APP_NAME: &str = "vr_hv1's Music Player";
 
 pub fn launch(
     cmd_tx: mpsc::UnboundedSender<MprisCommand>,

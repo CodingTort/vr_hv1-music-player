@@ -5,7 +5,7 @@
 # vr_hv1's music client
 
 **A fast, native Linux music player with synced lyrics, furigana, romaji and YouTube downloads,**
-**on your desktop, in a terminal, and on your phone.** It shows up on your desktop as *Tort's Music Player*.
+**on your desktop, in a terminal, and on your phone.** It shows up on your desktop as *vr_hv1's Music Player*.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
@@ -78,7 +78,7 @@ Japanese music.
 - Desktop notifications when the track changes.
 
 **Terminal and phone**
-- **Terminal client** (`lavanda-tui`) with the same library, lyrics, furigana, romaji, YouTube and
+- **Terminal client** (`vrmusic`) with the same library, lyrics, furigana, romaji, YouTube and
   playlists, album art drawn in the terminal, and mouse/touch support. It fits a phone screen over SSH.
 - **Listen on your phone**: press `o` and the music plays in your phone's browser (lock-screen controls,
   synced lyrics), reached privately over Tailscale or an SSH tunnel.
@@ -100,8 +100,8 @@ make install
 ```
 
 Then install the [UDEV Gothic NF](#fonts) font, make sure `~/.local/bin` is on your `PATH`, and launch
-**Tort's Music Player** from your app launcher or run `lavanda`. Your music is read from `~/Music`.
-In a terminal (or over SSH), run `lavanda-tui`.
+**vr_hv1's Music Player** from your app launcher or run `lavanda`. Your music is read from `~/Music`.
+In a terminal (or over SSH), run `vrmusic`.
 
 ## Requirements
 
@@ -141,7 +141,7 @@ Everything below is optional. When a tool is missing, the app keeps working with
 | Live theme following | [Omarchy](https://omarchy.org) | — | — | — |
 | Command-line control | `playerctl` | `playerctl` | `playerctl` | `playerctl` |
 | [Listening on your phone](#listen-on-your-phone) without an SSH tunnel | [Tailscale](https://tailscale.com) on the computer and the phone | `tailscale` | [tailscale.com/download](https://tailscale.com/download) | `tailscale` |
-| Keeping the terminal client running when SSH disconnects | `tmux` | `tmux` | `tmux` | `tmux` |
+| Keeping the terminal client running when SSH disconnects (`vrmusic` uses it when installed) | `tmux` | `tmux` | `tmux` | `tmux` |
 | Phone playback of OGG, Opus and other formats Safari can't play | `ffmpeg` | `ffmpeg` | `ffmpeg` | `ffmpeg` (RPM Fusion) |
 
 ### Fonts
@@ -165,7 +165,7 @@ make install          # builds in release mode, installs to ~/.local
 | File | Location |
 |---|---|
 | desktop app | `~/.local/bin/lavanda` |
-| terminal client | `~/.local/bin/lavanda-tui` |
+| terminal client, and `vrmusic`, which runs it in tmux | `~/.local/bin/vrmusic-tui`, `~/.local/bin/vrmusic` |
 | app launcher entry | `~/.local/share/applications/lavanda.desktop` |
 | icon | `~/.local/share/icons/hicolor/{scalable,256x256}/apps/tort-music-player.*` |
 
@@ -225,7 +225,7 @@ select several.
 
 ![The terminal client: library, songs, and synced lyrics with furigana; album art in the player bar](docs/screenshots/terminal.png)
 
-`lavanda-tui` is the same player for the terminal: it uses the same library, playlists, likes, lyric
+`vrmusic` opens the same player in the terminal: it uses the same library, playlists, likes, lyric
 timing fixes and settings as the desktop app (run one of the two at a time). It works in any terminal
 with 24-bit colour, including SSH apps on phones, and adapts to the size of the screen:
 
@@ -276,12 +276,13 @@ land on the player, whose link now carries the key: tap **Share › Add to Home 
 enter the code. On an iPhone the tunnel stops a short while after you switch away from the SSH app, so
 Tailscale works better there.
 
-**Over SSH, run it inside tmux** (`tmux new -A -s music lavanda-tui`), so the player keeps going when the
-SSH app on your phone is suspended; `tmux attach -t music` brings it back.
+**Over SSH, start it with `vrmusic`**: it runs the player inside tmux, so the player keeps going when the
+SSH app on your phone is suspended, and running `vrmusic` again takes you back to it. (`vrmusic-tui` runs
+the player directly, without tmux.)
 
 Tips: the first song needs a tap (phones don't start sound on their own). With the phone locked, songs
 still move on by themselves and the lock-screen buttons work; commands from the terminal reach the page
-when it's back on screen. `lavanda-tui --phone` starts straight in phone mode.
+when it's back on screen. `vrmusic --phone` starts straight in phone mode.
 
 ## Configuration
 

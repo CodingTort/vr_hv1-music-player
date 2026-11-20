@@ -191,7 +191,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect, p: Pal) {
-    let title = Span::styled(" ♪ Tort's Music Player ", Style::default().fg(p.accent).add_modifier(Modifier::BOLD));
+    let title = Span::styled(format!(" ♪ {} ", crate::audio::mpris::APP_NAME), Style::default().fg(p.accent).add_modifier(Modifier::BOLD));
     let output = match app.output {
         Output::Laptop => Span::styled(" laptop ", Style::default().fg(p.sub)),
         Output::Phone => Span::styled(" ▶ phone ", Style::default().fg(Color::Black).bg(p.accent)),
