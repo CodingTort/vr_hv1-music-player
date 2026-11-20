@@ -1,6 +1,6 @@
 [package]
 name = "lavanda"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 rust-version = "1.89"
 description = "Tort's Music Player: a native Linux music player with synced lyrics, furigana, romaji and YouTube downloads (a lavanda fork)"

@@ -4,6 +4,19 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-11-20
+
+### Fixed
+
+- Typing a non-ASCII character (such as `é`) into a colour field in Settings crashed the app.
+- `lavanda --about` and `--help` described the original lavanda project and linked to its repository.
+- "Search cover online" in the tag editor cut the search short at `&`, `#` or `/` in artist or album names.
+
+### Documentation
+
+- README: the MeCab AUR package is `mecab-git`; added a note for rustup users, a "Known limitations"
+  section and the cover search in the privacy table; corrected what `/` and `language` do.
+
 ## [1.1.0] - 2026-11-20
 
 The first release of this fork, based on [lavanda](https://github.com/sheep-farm/lavanda) 1.0.1.
@@ -45,4 +58,5 @@ The first release of this fork, based on [lavanda](https://github.com/sheep-farm
 - Lyrics uploads with a translation woven in highlighted the translation.
 - Leftover `notify-send` processes piled up.
 
+[1.1.1]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.1
 [1.1.0]: https://github.com/CodingTort/vr_hv1-s-music-client/releases/tag/v1.1.0
