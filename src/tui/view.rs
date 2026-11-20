@@ -805,7 +805,7 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect, p: Pal) {
                 ("R  D", "rename / delete playlist"),
                 ("x  i", "export / import playlist (CSV)"),
                 ("y", "search & download from YouTube"),
-                ("o", "play on phone ⇄ this computer"),
+                ("o  O", "play on phone ⇄ here / phone code"),
                 ("v", "visualiser"),
                 (",", "settings"),
                 ("F5", "rescan library"),
@@ -947,27 +947,47 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect, p: Pal) {
         }
         Modal::Phone => {
             let w = (area.width.min(96) as usize).saturating_sub(4);
-            let mut lines = vec![
-                Line::from(Span::styled("Open this link in Safari (or any browser) on your phone:", Style::default().fg(p.text))),
-                Line::from(""),
-            ];
-            let (tailnet, local): (Vec<&String>, Vec<&String>) = app.phone_urls.iter().partition(|u| !u.starts_with("http://localhost"));
-            if !tailnet.is_empty() {
-                lines.push(Line::from(Span::styled("Over Tailscale:", Style::default().fg(p.sub))));
-                for u in &tailnet {
-                    for part in wrap(u, w) {
-                        lines.push(Line::from(Span::styled(part, Style::default().fg(p.accent))));
+            let (tailnet, local): (Vec<&String>, Vec<&String>) = app.phone_addresses.iter().partition(|u| !u.starts_with("http://localhost"));
+            let code = app.phone_code.as_deref().map(|c| format!("{} {}", &c[..3], &c[3..])).unwrap_or_default();
+            let mut lines = vec![Line::from(Span::styled("On your phone, open in Safari (or any browser):", Style::default().fg(p.text)))];
+            let addr = |lines: &mut Vec<Line<'static>>, u: &str| {
+                for part in wrap(u, w) {
+                    lines.push(Line::from(Span::styled(part, Style::default().fg(p.accent).add_modifier(Modifier::BOLD))));
+                }
+            };
+            match tailnet.first() {
+                Some(u) => {
+                    addr(&mut lines, u);
+                    if let Some(ip) = tailnet.get(1) {
+                        lines.push(Line::from(Span::styled(fit(&format!("(or {ip})"), w), Style::default().fg(p.dim))));
                     }
                 }
-                lines.push(Line::from(""));
-            }
-            if let Some(u) = local.first() {
-                let port = crate::config::get().phone_port;
-                lines.push(Line::from(Span::styled(fit(&format!("Through SSH: connect with  -L {port}:127.0.0.1:{port}  then open"), w), Style::default().fg(p.sub))));
-                for part in wrap(u, w) {
-                    lines.push(Line::from(Span::styled(part, Style::default().fg(p.accent))));
+                None => {
+                    if let Some(u) = local.first() {
+                        addr(&mut lines, u);
+                    }
                 }
-                lines.push(Line::from(""));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("and enter the code  ", Style::default().fg(p.text)),
+                Span::styled(format!(" {code} "), Style::default().fg(Color::Black).bg(p.accent).add_modifier(Modifier::BOLD)),
+            ]));
+            for part in wrap("It works for 10 minutes. Then add the page to your Home Screen.", w) {
+                lines.push(Line::from(Span::styled(part, Style::default().fg(p.dim))));
+            }
+            lines.push(Line::from(""));
+            if !tailnet.is_empty() {
+                if let Some(u) = local.first() {
+                    let port = crate::config::get().phone_port;
+                    for part in wrap(&format!("Without Tailscale: SSH with -L {port}:127.0.0.1:{port}, then {u}"), w) {
+                        lines.push(Line::from(Span::styled(part, Style::default().fg(p.dim))));
+                    }
+                }
+            } else {
+                for part in wrap("That's through an SSH tunnel; with Tailscale it works without one.", w) {
+                    lines.push(Line::from(Span::styled(part, Style::default().fg(p.dim))));
+                }
             }
             let seen = match app.phone_seen {
                 Some(t) if t.elapsed() < Duration::from_secs(10) => Span::styled("Phone connected", Style::default().fg(p.green)),
@@ -975,7 +995,7 @@ fn draw_modal(f: &mut Frame, app: &mut App, area: Rect, p: Pal) {
                 None => Span::styled("Waiting for the phone…", Style::default().fg(p.sub)),
             };
             lines.push(Line::from(seen));
-            lines.push(Line::from(Span::styled(fit("Keep the link private: it contains this player's key. o switches back.", w), Style::default().fg(p.dim))));
+            lines.push(Line::from(Span::styled(fit("o moves the music back to this computer.", w), Style::default().fg(p.dim))));
             let r = centered(area, 96, lines.len() as u16 + 2);
             let inner = dialog(f, r, "Play on your phone", p);
             f.render_widget(Paragraph::new(lines), inner);

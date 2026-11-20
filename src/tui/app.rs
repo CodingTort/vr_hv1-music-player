@@ -28,7 +28,7 @@ pub enum Job {
     ImportDownloaded(Result<Option<PathBuf>, String>),
     Scanned(Vec<Track>, Rescan),
     Cover(PathBuf, Option<image::RgbaImage>),
-    PhoneUrls(Vec<String>),
+    PhoneAddresses(Vec<String>),
 }
 
 /// Why the library was scanned again.
@@ -343,7 +343,10 @@ pub struct App {
     // Phone
     pub output: Output,
     pub phone: Option<crate::phone::Server>,
-    pub phone_urls: Vec<String>,
+    /// Where the phone can reach the player (no key in them).
+    pub phone_addresses: Vec<String>,
+    /// The pairing code shown in the phone dialog.
+    pub phone_code: Option<String>,
     /// Last state sent to the page; `None` = send it again.
     phone_published: Option<PhoneKey>,
     phone_lyrics_published: (Option<i64>, u64, i64),
@@ -416,7 +419,8 @@ impl App {
             yt_search_seq: 0,
             output: Output::Laptop,
             phone: None,
-            phone_urls: Vec::new(),
+            phone_addresses: Vec::new(),
+            phone_code: None,
             phone_published: None,
             phone_lyrics_published: (None, u64::MAX, 0),
             phone_seen: None,
@@ -1252,7 +1256,7 @@ impl App {
                 self.import_next();
             }
             Job::Scanned(tracks, why) => self.on_scanned(tracks, why),
-            Job::PhoneUrls(urls) => self.phone_urls = urls,
+            Job::PhoneAddresses(a) => self.phone_addresses = a,
         }
     }
 
@@ -1632,12 +1636,12 @@ impl App {
         }
         match crate::phone::Server::start(&self.rt, crate::config::get().phone_port, &self.tracks) {
             Ok(server) => {
-                let (jobs, token, port) = (self.jobs.clone(), server.token.clone(), server.port);
+                let (jobs, port) = (self.jobs.clone(), server.port);
                 self.rt.spawn(async move {
-                    let urls = crate::phone::urls(port, &token).await;
-                    let _ = jobs.send(Job::PhoneUrls(urls));
+                    let addresses = crate::phone::addresses(port).await;
+                    let _ = jobs.send(Job::PhoneAddresses(addresses));
                 });
-                self.phone_urls = vec![format!("http://localhost:{port}/?k={}", server.token)];
+                self.phone_addresses = vec![format!("http://localhost:{port}")];
                 self.phone = Some(server);
                 true
             }
@@ -1646,6 +1650,15 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Shows how to connect the phone, with a fresh pairing code.
+    pub fn open_phone_dialog(&mut self) {
+        if !self.ensure_phone_server() {
+            return;
+        }
+        self.phone_code = self.phone.as_ref().map(|s| s.new_pairing_code());
+        self.modal = Some(Modal::Phone);
     }
 
     /// Moves playback between the laptop and the phone, at the same spot.
@@ -1664,7 +1677,7 @@ impl App {
                     }
                 }
                 self.spectrum.iter_mut().for_each(|b| *b = 0.0);
-                self.modal = Some(Modal::Phone);
+                self.open_phone_dialog();
             }
             Output::Phone => {
                 self.output = Output::Laptop;

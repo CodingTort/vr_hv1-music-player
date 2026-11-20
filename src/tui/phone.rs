@@ -23,6 +23,18 @@ use crate::lyrics::LyricLine;
 
 const PAGE: &str = include_str!("phone.html");
 const ICON: &[u8] = include_bytes!("../../assets/tux.png");
+const PAIR_PAGE: &str = include_str!("pair.html");
+
+/// How long a pairing code works, and how many wrong tries it allows.
+const CODE_LIFETIME: Duration = Duration::from_secs(10 * 60);
+const CODE_TRIES: u32 = 5;
+
+/// A short code to type on the phone instead of copying the long link.
+struct Pairing {
+    code: String,
+    expires: std::time::Instant,
+    tries: u32,
+}
 
 /// What the terminal client tells the page to do.
 pub enum Cmd {
@@ -68,10 +80,10 @@ struct Ctx {
     events: mpsc::UnboundedSender<Event>,
     /// One transcode at a time.
     transcoding: tokio::sync::Mutex<()>,
+    pairing: Mutex<Option<Pairing>>,
 }
 
 pub struct Server {
-    pub token: String,
     pub port: u16,
     ctx: Arc<Ctx>,
     events: mpsc::UnboundedReceiver<Event>,
@@ -96,8 +108,9 @@ impl Server {
             changed,
             events: events_tx,
             transcoding: tokio::sync::Mutex::new(()),
+            pairing: Mutex::new(None),
         });
-        let server = Server { token, port, ctx, events };
+        let server = Server { port, ctx, events };
         server.set_library(tracks);
 
         // This computer (for SSH tunnels), and the Tailscale address if any.
@@ -123,6 +136,15 @@ impl Server {
             });
         }
         Ok(server)
+    }
+
+    /// A new 6-digit pairing code (the old one stops working).
+    pub fn new_pairing_code(&self) -> String {
+        use rand::Rng;
+        let code = format!("{:06}", rand::thread_rng().gen_range(0..1_000_000));
+        *self.ctx.pairing.lock().unwrap() =
+            Some(Pairing { code: code.clone(), expires: std::time::Instant::now() + CODE_LIFETIME, tries: 0 });
+        code
     }
 
     pub fn try_event(&mut self) -> Option<Event> {
@@ -187,17 +209,21 @@ impl Server {
     }
 }
 
-/// Addresses to open on the phone, best first.
-pub async fn urls(port: u16, token: &str) -> Vec<String> {
-    let mut urls = Vec::new();
+/// Addresses to open on the phone, best first, without the key: the
+/// computer's short Tailscale name, its Tailscale address, and this
+/// computer itself (for an SSH tunnel).
+pub async fn addresses(port: u16) -> Vec<String> {
+    let mut out = Vec::new();
     if let Some(name) = tailscale_name().await {
-        urls.push(format!("http://{name}:{port}/?k={token}"));
+        // The first label works on every device in the tailnet (MagicDNS).
+        let short = name.split('.').next().unwrap_or(&name).to_string();
+        out.push(format!("http://{short}:{port}"));
     }
     if let Some(ip) = tailscale_ip().await {
-        urls.push(format!("http://{ip}:{port}/?k={token}"));
+        out.push(format!("http://{ip}:{port}"));
     }
-    urls.push(format!("http://localhost:{port}/?k={token}"));
-    urls
+    out.push(format!("http://localhost:{port}"));
+    out
 }
 
 async fn run(cmd: &str, args: &[&str]) -> Option<String> {
@@ -318,6 +344,31 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+enum CodeCheck {
+    Right,
+    Wrong,
+    /// None shown, expired, or used up by wrong tries.
+    NoCode,
+}
+
+fn check_code(ctx: &Ctx, typed: &str) -> CodeCheck {
+    let mut pairing = ctx.pairing.lock().unwrap();
+    let Some(p) = pairing.as_mut() else { return CodeCheck::NoCode };
+    if std::time::Instant::now() >= p.expires || p.tries >= CODE_TRIES {
+        *pairing = None;
+        return CodeCheck::NoCode;
+    }
+    if same_key(typed, &p.code) {
+        return CodeCheck::Right;
+    }
+    p.tries += 1;
+    if p.tries >= CODE_TRIES {
+        *pairing = None;
+        return CodeCheck::NoCode;
+    }
+    CodeCheck::Wrong
+}
+
 /// Compares in time independent of where the strings differ.
 fn same_key(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
@@ -343,7 +394,24 @@ async fn handle(mut sock: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
     }
     let authorised = req.query.get("k").is_some_and(|k| same_key(k, &ctx.token));
     if !authorised {
-        return respond(&mut sock, "403 Forbidden", &[("Content-Type", "text/plain".into())], b"This link needs its key (?k=...). Open the link shown by lavanda-tui.").await;
+        return match (req.method.as_str(), req.path.as_str()) {
+            // Without the key: the page asking for the pairing code.
+            ("GET", "/") => {
+                let headers = [("Content-Type", "text/html; charset=utf-8".into()), ("Cache-Control", "no-store".into())];
+                respond(&mut sock, "200 OK", &headers, PAIR_PAGE.as_bytes()).await
+            }
+            ("GET", "/pair") => {
+                let typed: String = req.query.get("code").map(|c| c.chars().filter(char::is_ascii_digit).collect()).unwrap_or_default();
+                let outcome = check_code(&ctx, &typed);
+                let to = match outcome {
+                    CodeCheck::Right => format!("/?k={}", ctx.token),
+                    CodeCheck::Wrong => "/?wrong=1".into(),
+                    CodeCheck::NoCode => "/?expired=1".into(),
+                };
+                respond(&mut sock, "303 See Other", &[("Location", to), ("Cache-Control", "no-store".into())], b"").await
+            }
+            _ => respond(&mut sock, "403 Forbidden", &[("Content-Type", "text/plain".into())], b"This needs the player's key: open the address shown by lavanda-tui.").await,
+        };
     }
 
     let segments: Vec<&str> = req.path.trim_start_matches('/').split('/').collect();
@@ -555,6 +623,46 @@ async fn transcoded(ctx: &Ctx, path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pairing_codes_expire_and_lock() {
+        let (changed, _) = watch::channel(0);
+        let (events, _rx) = mpsc::unbounded_channel();
+        let ctx = Ctx {
+            token: "k".repeat(32),
+            shared: Mutex::new(Shared {
+                paths: HashMap::new(),
+                state: json!(null),
+                lyrics: json!(null),
+                cmd_n: 0,
+                cmd: json!(null),
+                position: 0.0,
+                version: 0,
+            }),
+            changed,
+            events,
+            transcoding: tokio::sync::Mutex::new(()),
+            pairing: Mutex::new(None),
+        };
+        let set = |code: &str, expires_in: Duration| {
+            *ctx.pairing.lock().unwrap() = Some(Pairing { code: code.into(), expires: std::time::Instant::now() + expires_in, tries: 0 });
+        };
+        assert!(matches!(check_code(&ctx, "123456"), CodeCheck::NoCode), "no code shown yet");
+        set("123456", CODE_LIFETIME);
+        assert!(matches!(check_code(&ctx, "654321"), CodeCheck::Wrong));
+        assert!(matches!(check_code(&ctx, "123456"), CodeCheck::Right));
+        assert!(matches!(check_code(&ctx, "123456"), CodeCheck::Right), "works for a second device too");
+        // Five wrong tries use the code up, even the right one afterwards.
+        set("123456", CODE_LIFETIME);
+        for _ in 0..4 {
+            assert!(matches!(check_code(&ctx, "000000"), CodeCheck::Wrong));
+        }
+        assert!(matches!(check_code(&ctx, "000000"), CodeCheck::NoCode));
+        assert!(matches!(check_code(&ctx, "123456"), CodeCheck::NoCode));
+        // Expired.
+        set("123456", Duration::ZERO);
+        assert!(matches!(check_code(&ctx, "123456"), CodeCheck::NoCode));
+    }
 
     #[test]
     fn ranges() {

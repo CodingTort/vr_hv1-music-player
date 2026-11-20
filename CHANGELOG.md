@@ -16,7 +16,9 @@ All notable changes to this project. The format follows
   touch; a layout that fits a phone screen over SSH. `make install` installs it next to the desktop app.
 - **Listen on your phone**: `o` in the terminal client moves playback to a page in the phone's browser,
   with album art, synced lyrics and lock-screen controls, reached over Tailscale or an SSH tunnel and
-  protected by a secret key. Formats Safari can't play are converted with ffmpeg.
+  protected by a secret key. The phone connects with a short address and a 6-digit code instead of a
+  long link (which phone terminals cut off when they wrap it). Formats Safari can't play are converted
+  with ffmpeg.
 - `phone_port` setting.
 
 ### Changed

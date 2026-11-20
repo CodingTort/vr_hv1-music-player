@@ -247,7 +247,7 @@ with 24-bit colour, including SSH apps on phones, and adapts to the size of the 
 | `Esc` / `⌫` | back, clear search | | `R` / `D` | rename / delete playlist |
 | `/` | search | | `x` / `i` | export / import playlist (CSV) |
 | `Tab`, `1` `2` `3` | switch pane | | `y` | YouTube search and download |
-| `t` | now-playing view | | `o` | play on your phone ⇄ this computer |
+| `t` | now-playing view | | `o` / `O` | play on your phone ⇄ this computer / show the phone code |
 | `l` | like | | `e` | edit tags |
 | `v` | visualiser | | `,` | settings |
 | `F5` | rescan library | | `?` | all keys |
@@ -263,16 +263,18 @@ stays the remote control, and the page has its own play, pause and skip buttons.
 the music back to the computer at the same spot.
 
 The page is served by the terminal client itself. It listens only on the computer itself and on its
-Tailscale address, never on your other networks, and every link carries a secret key.
+Tailscale address, never on your other networks. A phone gets in with a 6-digit code shown in the
+terminal (5 tries, 10 minutes), which hands it the player's secret key.
 
 **With Tailscale** (recommended): install Tailscale on the computer and the phone, signed in to the same
-account. Press `o` and open the Tailscale link it shows in Safari. Tap **Share › Add to Home Screen** to
-keep it as an app.
+account. Press `o`: the terminal shows a short address such as `http://my-laptop:8337` and a 6-digit
+code. Open the address in Safari and enter the code (it works for 10 minutes; `O` shows a new one). You
+land on the player, whose link now carries the key: tap **Share › Add to Home Screen** to keep it as an app.
 
 **With an SSH tunnel**: connect with a port forward, e.g. `ssh -L 8337:127.0.0.1:8337 you@your-computer`
-(in Termius: *Port Forwarding*, local, 8337 → 127.0.0.1:8337), press `o`, and open the `localhost` link it
-shows. On an iPhone the tunnel stops a short while after you switch away from the SSH app, so Tailscale
-works better there.
+(in Termius: *Port Forwarding*, local, 8337 → 127.0.0.1:8337), press `o`, open `http://localhost:8337` and
+enter the code. On an iPhone the tunnel stops a short while after you switch away from the SSH app, so
+Tailscale works better there.
 
 **Over SSH, run it inside tmux** (`tmux new -A -s music lavanda-tui`), so the player keeps going when the
 SSH app on your phone is suspended; `tmux attach -t music` brings it back.

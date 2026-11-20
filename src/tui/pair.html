@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14121c">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Tort's Music Player</title>
+<style>
+  :root { --bg: #14121c; --text: #ece8f6; --dim: #a59fb8; --accent: #c4a7ff; --card: rgba(255,255,255,.07); --bad: #ef8aa1; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 17px/1.45 -apple-system, BlinkMacSystemFont, sans-serif; }
+  main { max-width: 420px; margin: 0 auto; padding: max(48px, env(safe-area-inset-top)) 24px 24px; text-align: center; }
+  img { width: 72px; height: 72px; }
+  h1 { font-size: 22px; margin: 12px 0 6px; }
+  p { color: var(--dim); margin: 0 0 22px; }
+  input { width: 100%; font-size: 34px; letter-spacing: .35em; text-align: center; padding: 14px 10px;
+    border-radius: 14px; border: 2px solid transparent; background: var(--card); color: var(--text); outline: none; }
+  input:focus { border-color: var(--accent); }
+  button { margin-top: 16px; width: 100%; font-size: 18px; font-weight: 600; padding: 14px; border: 0;
+    border-radius: 14px; background: var(--accent); color: #1a1426; }
+  #msg { min-height: 24px; margin-top: 14px; color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <img src="icon.png" alt="">
+  <h1>Tort's Music Player</h1>
+  <p>Enter the code shown in the terminal player<br>(press <b>o</b> there to see it).</p>
+  <form action="pair" method="get" autocomplete="off">
+    <input name="code" inputmode="numeric" pattern="[0-9 ]*" maxlength="7" autocomplete="one-time-code" autofocus required aria-label="Code">
+    <button type="submit">Connect</button>
+  </form>
+  <div id="msg"></div>
+</main>
+<script>
+  const q = new URLSearchParams(location.search);
+  const msg = document.getElementById("msg");
+  if (q.has("wrong")) msg.textContent = "That code isn't right. Try again.";
+  if (q.has("expired")) msg.textContent = "That code has expired. Press O (capital) in the terminal player for a new one.";
+</script>
+</body>
+</html>

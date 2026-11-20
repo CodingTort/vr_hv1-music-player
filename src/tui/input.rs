@@ -46,11 +46,7 @@ pub fn on_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('v') => app.show_spectrum = !app.show_spectrum,
         KeyCode::Char('t') => app.now_view = !app.now_view,
         KeyCode::Char('o') => app.toggle_output(),
-        KeyCode::Char('O') => {
-            if app.ensure_phone_server() {
-                app.modal = Some(Modal::Phone);
-            }
-        }
+        KeyCode::Char('O') => app.open_phone_dialog(),
         KeyCode::Char('y') => app.open_youtube(),
         KeyCode::Char('e') => app.open_tag_editor(),
         KeyCode::Char(',') => app.modal = Some(Modal::Settings(Settings { cursor: 0 })),
