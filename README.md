@@ -31,6 +31,7 @@ Japanese music.
 - [Configuration](#configuration)
 - [Desktop integration](#desktop-integration)
 - [Privacy](#privacy)
+- [Known limitations](#known-limitations)
 - [Project layout](#project-layout)
 - [Contributing](#contributing)
 - [Credits](#credits)
@@ -77,12 +78,12 @@ Japanese music.
 ## Quick start (Arch Linux)
 
 ```bash
-# Build tools, runtime and fonts
+# Build tools, runtime and fonts (already use rustup? leave out `rust`)
 sudo pacman -S --needed base-devel git rust alsa-lib yt-dlp ffmpeg curl kakasi \
     noto-fonts-cjk ttf-jetbrains-mono-nerd libnotify xdg-desktop-portal-gtk
 
 # Better Japanese readings (optional, from the AUR)
-yay -S mecab mecab-ipadic
+yay -S mecab-git mecab-ipadic
 
 # Build and install for your user (to ~/.local)
 git clone https://github.com/CodingTort/vr_hv1-s-music-client.git
@@ -115,15 +116,15 @@ These are already present on any normal Linux desktop:
 
 ### Optional features
 
-Everything below is optional. When a tool is missing, the app keeps working and that one feature tells
-you what to install.
+Everything below is optional. When a tool is missing, the app keeps working without that one feature
+(the YouTube and Romaji features tell you what to install).
 
 | Feature | Needs | Arch | Debian / Ubuntu | Fedora |
 |---|---|---|---|---|
 | YouTube search and download | `yt-dlp`, `ffmpeg` | `yt-dlp ffmpeg` | `yt-dlp ffmpeg` (or yt-dlp's [official release](https://github.com/yt-dlp/yt-dlp#installation), which stays current) | `yt-dlp ffmpeg` (RPM Fusion) |
 | Online lyrics, YouTube thumbnails | `curl` | `curl` | `curl` | `curl` |
 | Romaji and furigana | `kakasi` | `kakasi` | `kakasi` | `kakasi` |
-| Accurate Japanese readings (recommended alongside kakasi) | `mecab` with the IPAdic dictionary | AUR: `mecab mecab-ipadic` | `mecab mecab-ipadic-utf8` | `mecab mecab-ipadic` |
+| Accurate Japanese readings (recommended alongside kakasi) | `mecab` with the IPAdic dictionary | AUR: `mecab-git mecab-ipadic` | `mecab mecab-ipadic-utf8` | `mecab mecab-ipadic` |
 | Track-change notifications | `notify-send` | `libnotify` | `libnotify-bin` | `libnotify` |
 | File dialogs (background image, playlist import/export) | an XDG desktop portal | `xdg-desktop-portal-gtk` (or `-hyprland`, `-kde`) | `xdg-desktop-portal-gtk` | `xdg-desktop-portal-gtk` |
 | Tray icon | a StatusNotifierItem tray (Waybar `tray`, KDE, GNOME with AppIndicator) | — | — | — |
@@ -179,7 +180,8 @@ sung right now; the offset is saved for that song.
 over the kanji. Install MeCab for the most accurate readings: without it, kakasi is used, which
 sometimes misreads conjugated verbs and set phrases.
 
-**YouTube.** Press `y`, search, and press Enter or click a result to download it into your library.
+**YouTube.** Press `y`, type a search and press Enter. Click a result (or pick one with `↑` / `↓` and press
+Enter) to download it into your library.
 Files are tagged automatically, including the video ID, which playlist files rely on.
 
 **Playlist files.** Select a playlist and click its export icon to save a `.csv`. Use the import icon next
@@ -199,7 +201,7 @@ background (colour, gradient, image or blurred album cover), cover size and visu
 | `+` / `-` | volume | | `v` | visualiser |
 | `s` / `r` | shuffle / repeat | | `y` | YouTube search |
 | `↑` / `↓`, `Enter` | move, play | | `c` / `a` | new playlist / add to playlist |
-| `/` | search | | `l` | like |
+| `/` | clear the search | | `l` | like |
 | `F5` | rescan library | | `e` | edit tags |
 | `Ctrl+,` | settings | | `?` | all shortcuts |
 
@@ -216,7 +218,7 @@ music_dir = "~/Music"            # your library, scanned at start-up
 volume = 0.8
 shuffle = false
 repeat = false
-language = "auto"                # "auto", "en", "pt_BR", "es"
+language = "auto"                # "auto", "en", "pt_BR", "es" (translates only a few labels)
 seek_step = 5                    # seconds per ← / →
 volume_step = 0.05
 
@@ -287,8 +289,20 @@ The player works fully offline. It only goes online for these:
 | Lyrics lookup (turn off with `lyrics_online = false`) | the playing song's title, artist and length | lrclib.net |
 | YouTube search and download | your search text, or the video you picked | YouTube, via yt-dlp |
 | Search-result thumbnails | the video ID | i.ytimg.com |
+| "Search cover online" in the tag editor (only when you click it) | the album's artist and title | Google Images, in your browser |
 
 Nothing else leaves your computer.
+
+## Known limitations
+
+- The interface is in English. The `language` setting only translates the "No track" and "Unknown"
+  placeholders (into Portuguese or Spanish).
+- Without MeCab, furigana and romaji come from kakasi, which sometimes misreads conjugated verbs and set
+  phrases. Lyrics can also contain words that are written one way and sung another; furigana show the
+  dictionary reading.
+- The prebuilt release needs glibc 2.43 or newer (current Arch-based systems); elsewhere, build from source.
+- "Show window" from the tray works on Hyprland; on other desktops, use your task bar.
+- Seek accuracy depends on the file format, and there is no gapless playback.
 
 ## Project layout
 
