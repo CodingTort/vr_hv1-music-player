@@ -37,7 +37,7 @@ const EDGE_FADE: f32 = 0.18;
 const GLIDE: f32 = 9.0;
 const GLOW: f32 = 10.0;
 /// How long a manual scroll holds before the view follows the song again.
-const HOLD: Duration = Duration::from_secs(3);
+const HOLD: Duration = Duration::from_secs(10);
 /// Opacity of lines that are not being sung, and of a hovered one.
 const DIM: f32 = 0.35;
 const HOVER: f32 = 0.7;

@@ -4,6 +4,20 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] - 2026-11-20
+
+### Changed
+
+- Lyrics stay where you scroll them for 10 seconds after you stop, then follow the song again: on the
+  phone player (which used to snap back at once), in the terminal client (which used to stay put until
+  you pressed Esc) and in the desktop app (which waited 3 seconds).
+- The phone player keeps the line being sung in the centre of the lyrics box, also for the first and last
+  lines of a song.
+
+### Fixed
+
+- `--about` in 1.2.1 still named the repository's old address.
+
 ## [1.2.1] - 2026-11-20
 
 ### Fixed
@@ -100,6 +114,7 @@ The first release of this fork, based on [lavanda](https://github.com/sheep-farm
 - Lyrics uploads with a translation woven in highlighted the translation.
 - Leftover `notify-send` processes piled up.
 
+[1.2.2]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.2
 [1.2.1]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.1
 [1.2.0]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.2.0
 [1.1.1]: https://github.com/CodingTort/vr_hv1-music-client/releases/tag/v1.1.1

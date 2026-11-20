@@ -329,6 +329,9 @@ pub struct App {
     pub lyrics_offset: f32,
     /// Selected lyric line while the lyrics pane has the keyboard.
     pub lyric_cursor: Option<usize>,
+    /// When the listener last moved through the lyrics; after
+    /// `LYRIC_PAUSE` without that, they follow the song again.
+    pub lyric_touched: Option<Instant>,
     /// Bumped whenever the shown lyrics may have changed (for the phone).
     lyrics_rev: u64,
 
@@ -412,6 +415,7 @@ impl App {
             show_furigana: true,
             lyrics_offset: 0.0,
             lyric_cursor: None,
+            lyric_touched: None,
             lyrics_rev: 0,
             cover: None,
             modal: None,
@@ -452,10 +456,14 @@ impl App {
         self.status = Status { text: text.into(), error: true, until: Some(Instant::now() + Duration::from_secs(8)) };
     }
 
-    /// Once per frame: expire the status line, follow the Omarchy theme.
+    /// Once per frame: expire the status line, let the lyrics follow the
+    /// song again after a pause in browsing them, follow the Omarchy theme.
     pub fn tick(&mut self) {
         if self.status.until.is_some_and(|t| Instant::now() >= t) {
             self.status = Status::default();
+        }
+        if self.lyric_cursor.is_some() && self.lyric_touched.is_none_or(|t| t.elapsed() >= LYRIC_PAUSE) {
+            self.lyric_cursor = None;
         }
         if self.theme_checked.elapsed() >= Duration::from_secs(3) {
             self.theme_checked = Instant::now();
@@ -1804,6 +1812,9 @@ impl App {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// How long the lyrics stay where the listener scrolled them.
+pub const LYRIC_PAUSE: Duration = Duration::from_secs(10);
 
 pub fn furigana_key(lines: &[LyricLine]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();

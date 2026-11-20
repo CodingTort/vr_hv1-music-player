@@ -43,7 +43,8 @@ Japanese music.
 
 **Lyrics**
 - **Synced lyrics panel**: the line being sung lights up and the text glides along with the song.
-  Click a line to jump there, scroll to look around, drag the panel edge to resize it.
+  Click a line to jump there, or scroll to look around: it follows the song again 10 seconds after you
+  stop. Drag the panel edge to resize it.
 - Lyrics come from a `.lrc` file next to the song, the file's embedded lyrics, or [LRCLIB](https://lrclib.net).
   Lookups understand YouTube-style titles (`【Artist】Song (Official Video)`) and covers (`歌ってみた`, `Cover`).
 - **Per-song timing fix**: if lyrics run early or late, right-click the line being sung, or nudge with `[` / `]`.
@@ -252,14 +253,15 @@ with 24-bit colour, including SSH apps on phones, and adapts to the size of the 
 | `F5` | rescan library | | `?` | all keys |
 
 Mouse and touch: click or tap to select, double-click to play, scroll, click the progress bar to seek,
-click a lyric line to jump to it. Messages the player would print go to `~/.cache/lavanda/tui.log`.
+click a lyric line to jump to it. After you scroll the lyrics, they follow the song again 10 seconds later. Messages the player would print go to `~/.cache/lavanda/tui.log`.
 
 ## Listen on your phone
 
 <p align="center"><img src="docs/screenshots/phone.png" width="560" alt="On an iPhone: vrmusic in an SSH app (now-playing view with furigana) and the phone player in Safari, playing the same song with synced lyrics"></p>
 
 Press `o` in the terminal client and the music moves to your phone: it plays in the phone's browser
-(Safari on an iPhone), with the album art, synced lyrics and lock-screen controls, in the player's theme. The terminal client
+(Safari on an iPhone), with the album art, synced lyrics (kept centred on the line being sung; scroll them
+freely, and they return to it 10 seconds after you stop) and lock-screen controls, in the player's theme. The terminal client
 stays the remote control, and the page has its own play, pause and skip buttons. Press `o` again to bring
 the music back to the computer at the same spot.
 

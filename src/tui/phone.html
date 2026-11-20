@@ -34,7 +34,8 @@
   button svg { width: 34px; height: 34px; fill: currentColor; }
   #play svg { width: 58px; height: 58px; }
   /* position: relative makes the lines' offsetTop count from this box. */
-  #lyrics { position: relative; flex: 1; min-height: 160px; max-height: 42vh; overflow-y: auto; padding: 8px 4px 40vh;
+  /* Padding of half the box above and below, so any line can be centred. */
+  #lyrics { position: relative; flex: 1; min-height: 160px; max-height: 42vh; overflow-y: auto; padding: 21vh 4px;
     background: var(--card); border-radius: 16px; scroll-behavior: smooth; }
   #lyrics p { margin: 0; padding: 7px 14px; font-size: 18px; font-weight: 600; color: rgba(236,232,246,.38);
     transition: color .25s, transform .25s; transform-origin: left center; }
@@ -77,7 +78,10 @@ let lastCmd = null;        // number of the last command applied
 let wantPlay = false;      // play once allowed (iOS needs a tap first)
 let pendingSeek = 0;
 let lyrics = { id: null, synced: false, lines: [] };
-let lyricIdx = -1;
+let lyricIdx = -1;        // line being sung
+let centred = -1;         // line the box was last centred on
+let touchedAt = 0;        // when the listener last scrolled the lyrics
+const SNAP_PAUSE = 10000; // ms after that before following the song again
 let seeking = false;
 
 const url = (path, params = {}) => {
@@ -163,6 +167,8 @@ function applyState(st) {
 function applyLyrics(ly) {
   lyrics = ly;
   lyricIdx = -1;
+  centred = -1;
+  touchedAt = 0;
   const box = $("lyrics");
   box.innerHTML = "";
   box.classList.toggle("plain", !ly.synced);
@@ -173,27 +179,41 @@ function applyLyrics(ly) {
   ly.lines.forEach(([t, text], i) => {
     const p = document.createElement("p");
     p.textContent = text.trim() ? text : "♪";
-    if (ly.synced) p.onclick = () => { audio.currentTime = Math.max(0, t); report(); };
+    // Tapping a line jumps there, and the box follows again at once.
+    if (ly.synced) p.onclick = () => { audio.currentTime = Math.max(0, t); touchedAt = 0; centred = -1; report(); followLyrics(); };
     box.appendChild(p);
   });
   box.scrollTop = 0;
 }
 
+function centre(i) {
+  const box = $("lyrics"), p = box.children[i];
+  if (!p) return;
+  box.scrollTop = p.offsetTop + p.offsetHeight / 2 - box.clientHeight / 2;
+  centred = i;
+}
+
+// Highlights the line being sung and keeps it in the middle of the box,
+// except for 10 seconds after the listener scrolls the lyrics themselves.
 function followLyrics() {
   if (!lyrics.synced || lyrics.id !== loaded) return;
   const t = audio.currentTime;
   let i = -1;
   for (let j = 0; j < lyrics.lines.length; j++) { if (lyrics.lines[j][0] <= t) i = j; else break; }
-  if (i === lyricIdx) return;
   const ps = $("lyrics").children;
-  if (ps[lyricIdx]) ps[lyricIdx].classList.remove("now");
-  lyricIdx = i;
-  if (ps[i]) {
-    ps[i].classList.add("now");
-    const box = $("lyrics");
-    box.scrollTop = ps[i].offsetTop - box.clientHeight / 3;
+  if (i !== lyricIdx) {
+    if (ps[lyricIdx]) ps[lyricIdx].classList.remove("now");
+    if (ps[i]) ps[i].classList.add("now");
+    lyricIdx = i;
   }
+  if (i >= 0 && centred !== i && Date.now() - touchedAt >= SNAP_PAUSE) centre(i);
 }
+
+for (const ev of ["wheel", "touchstart", "touchmove", "pointerdown"]) {
+  $("lyrics").addEventListener(ev, () => { touchedAt = Date.now(); centred = -1; }, { passive: true });
+}
+// Also while paused, so the box goes back to the line after the pause.
+setInterval(followLyrics, 500);
 
 function report() {
   if (state && state.active && loaded != null) {

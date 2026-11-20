@@ -166,6 +166,7 @@ fn move_in_pane(app: &mut App, delta: isize) {
                 crate::view::active_line(&shown_lines(app).unwrap_or_default(), app.lyric_position()).unwrap_or(0)
             });
             app.lyric_cursor = Some((start as isize + delta).clamp(0, n as isize - 1) as usize);
+            app.lyric_touched = Some(Instant::now());
         }
     }
 }
