@@ -1,6 +1,6 @@
 [package]
 name = "lavanda"
-version = "1.3.0"
+version = "1.3.1"
 edition = "2021"
 rust-version = "1.89"
 description = "vr_hv1's Music Player: a native Linux music player with synced lyrics, furigana, romaji and YouTube downloads, a terminal client, and playback on your phone (a lavanda fork)"

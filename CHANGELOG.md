@@ -4,6 +4,14 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] - 2026-11-21
+
+### Fixed
+
+- Desktop app: with the cursor in the YouTube dialog's search box, Esc only took the cursor out of the
+  box, and a second Esc was needed to close the dialog. In between, typing went nowhere and Enter
+  downloaded the selected result. One Esc closes the dialog now.
+
 ## [1.3.0] - 2026-11-21
 
 ### Added
@@ -147,6 +155,7 @@ The first release of this fork, based on [lavanda](https://github.com/sheep-farm
 - Lyrics uploads with a translation woven in highlighted the translation.
 - Leftover `notify-send` processes piled up.
 
+[1.3.1]: https://github.com/CodingTort/vr_hv1-music-player/releases/tag/v1.3.1
 [1.3.0]: https://github.com/CodingTort/vr_hv1-music-player/releases/tag/v1.3.0
 [1.2.2]: https://github.com/CodingTort/vr_hv1-music-player/releases/tag/v1.2.2
 [1.2.1]: https://github.com/CodingTort/vr_hv1-music-player/releases/tag/v1.2.1

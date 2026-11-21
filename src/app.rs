@@ -3172,6 +3172,21 @@ impl AppState {
 
         let mut subs = vec![base];
 
+        if self.yt_dialog.is_some() {
+            // The search box keeps Esc for itself (it only drops the focus), so
+            // the key handler never saw the first Esc and the dialog stayed open.
+            subs.push(iced::event::listen_with(|event, status, _| {
+                use iced::keyboard::{key::Named, Event, Key};
+                match (event, status) {
+                    (
+                        iced::Event::Keyboard(Event::KeyPressed { key: Key::Named(Named::Escape), .. }),
+                        iced::event::Status::Captured,
+                    ) => Some(Message::CloseYtSearch),
+                    _ => None,
+                }
+            }));
+        }
+
         if self.dragging_sidebar {
             subs.push(iced::event::listen_with(|event, _, _| {
                 use iced::mouse;
